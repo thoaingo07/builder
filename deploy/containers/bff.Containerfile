@@ -19,6 +19,7 @@ COPY --from=ui /ui/dist /app/ui
 ENV ASPNETCORE_URLS=http://+:19000 \
     Ui__Path=/app/ui \
     DataDirectory=/data
+RUN mkdir -p /data && chown $APP_UID /data
 VOLUME /data
 EXPOSE 19000
 USER $APP_UID

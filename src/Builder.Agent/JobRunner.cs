@@ -19,12 +19,13 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
             log.System($"Agent {options.EffectiveName} running '{job.TaskName}' of {job.PipelineName} #{job.BuildNumber}");
 
             await workspace.CheckoutAsync(job.Source, log, ct);
+            var taskDir = workspace.TaskDirectory(job.TaskfilePath);
 
             foreach (var artifact in job.DownloadArtifacts)
             {
                 log.System($"Downloading artifact '{artifact.Name}'");
                 await using var stream = await http.GetStreamAsync(artifact.DownloadPath, ct);
-                await workspace.UnpackAsync(stream, ct);
+                await workspace.UnpackAsync(stream, taskDir, ct);
             }
 
             var env = new Dictionary<string, string>(job.Env);
@@ -54,7 +55,7 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
             if (job.UploadArtifacts.Length > 0)
             {
                 var name = string.Concat(job.TaskName.Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '-'));
-                var (path, count) = await workspace.PackAsync(job.UploadArtifacts, name, ct);
+                var (path, count) = await workspace.PackAsync(job.UploadArtifacts, name, taskDir, ct);
                 if (count == 0) log.Err($"No files matched artifacts [{string.Join(", ", job.UploadArtifacts)}]");
                 else
                 {

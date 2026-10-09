@@ -84,27 +84,31 @@ public sealed class Workspace
         return derived;
     }
 
-    /// <summary>Packs files matching the globs (relative to the checkout) into one tar.gz.</summary>
-    public async Task<(string Path, int Files)> PackAsync(IEnumerable<string> globs, string name, CancellationToken ct)
+    /// <summary>The directory go-task runs commands in: the Taskfile's own directory.</summary>
+    public string TaskDirectory(string taskfilePath) => Path.GetDirectoryName(Path.GetFullPath(Path.Combine(Source, taskfilePath)))!;
+
+    /// <summary>Packs files matching the globs (relative to <paramref name="baseDir"/>) into one tar.gz.</summary>
+    public async Task<(string Path, int Files)> PackAsync(IEnumerable<string> globs, string name, string baseDir, CancellationToken ct)
     {
         var matcher = new Matcher();
         foreach (var g in globs) matcher.AddInclude(g.TrimStart('/'));
-        var files = matcher.GetResultsInFullPath(Source).ToList();
+        var files = matcher.GetResultsInFullPath(baseDir).ToList();
         var archive = Path.Combine(Temp, $"{name}-{Guid.NewGuid():N}.tar.gz");
         await using (var file = File.Create(archive))
         await using (var gz = new GZipStream(file, CompressionLevel.Fastest))
         await using (var tar = new TarWriter(gz, TarEntryFormat.Pax))
         {
             foreach (var f in files)
-                await tar.WriteEntryAsync(f, Path.GetRelativePath(Source, f).Replace('\\', '/'), ct);
+                await tar.WriteEntryAsync(f, Path.GetRelativePath(baseDir, f).Replace('\\', '/'), ct);
         }
         return (archive, files.Count);
     }
 
-    public async Task UnpackAsync(Stream tarGz, CancellationToken ct)
+    public async Task UnpackAsync(Stream tarGz, string baseDir, CancellationToken ct)
     {
+        Directory.CreateDirectory(baseDir);
         await using var gz = new GZipStream(tarGz, CompressionMode.Decompress);
-        await TarFile.ExtractToDirectoryAsync(gz, Source, overwriteFiles: true, ct);
+        await TarFile.ExtractToDirectoryAsync(gz, baseDir, overwriteFiles: true, ct);
     }
 
     private async Task<int> Git(JobLog log, CancellationToken ct, string[]? pre, params string[] args) =>

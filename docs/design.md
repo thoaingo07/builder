@@ -64,7 +64,8 @@ x-builder:
 tasks:
   build-api:
     x-agent: { labels: [linux, dotnet] }   # agent must have all labels
-    x-artifacts: [out/api/**]              # uploaded to the server after success
+    x-artifacts: [out/api/**]              # relative to the Taskfile's directory; uploaded after success,
+                                           # unpacked into the same place for downstream jobs
     cmds: [dotnet publish src/Api -o out/api]
 
   approve-prod:

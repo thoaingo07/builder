@@ -90,6 +90,39 @@ public sealed class EndToEndTests(AspireFixture aspire) : IDisposable
     }
 
     [Fact]
+    public async Task Artifacts_are_relative_to_a_nested_taskfile()
+    {
+        var repo = CreateRepository("""
+            version: '3'
+            tasks:
+              produce:
+                x-artifacts: [out/**]
+                cmds:
+                  - mkdir -p out
+                  - echo nested > out/file.txt
+              consume:
+                deps: [produce]
+                cmds:
+                  - test "$(cat out/file.txt)" = nested
+            """, path: "ci/Taskfile.yml");
+        using var http = await LoginAsync();
+        var pipeline = await PostAsync(http, "/api/pipelines", new
+        {
+            name = "nested-" + Guid.NewGuid().ToString("N")[..6], repositoryUrl = repo, defaultBranch = "main",
+            taskfilePath = "ci/Taskfile.yml", entryTask = "consume",
+        });
+        var build = await PostAsync(http, $"/api/pipelines/{pipeline["id"]}/builds", new { });
+        var buildUrl = $"/api/builds/{build["id"]}";
+        var status = "";
+        await WaitUntilAsync(async () =>
+        {
+            status = (await http.GetFromJsonAsync<JsonNode>(buildUrl))!["status"]!.GetValue<string>();
+            return status is "Succeeded" or "Failed";
+        }, "the build to finish");
+        Assert.Equal("Succeeded", status);
+    }
+
+    [Fact]
     public async Task Cancel_stops_a_running_build()
     {
         var repo = CreateRepository("""
@@ -168,14 +201,15 @@ public sealed class EndToEndTests(AspireFixture aspire) : IDisposable
         Assert.Fail($"Timed out waiting for {what}.");
     }
 
-    private string CreateRepository(string taskfile = Taskfile)
+    private string CreateRepository(string taskfile = Taskfile, string path = "Taskfile.yml")
     {
         var bare = Path.Combine(_repoDir, "repo.git");
         var work = Path.Combine(_repoDir, "work");
         Directory.CreateDirectory(work);
         Git(_repoDir, "init", "--quiet", "--bare", bare);
         Git(work, "init", "--quiet", "-b", "main");
-        File.WriteAllText(Path.Combine(work, "Taskfile.yml"), taskfile);
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(work, path))!);
+        File.WriteAllText(Path.Combine(work, path), taskfile);
         Git(work, "add", "-A");
         Git(work, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "init");
         Git(work, "push", "--quiet", bare, "HEAD:main");

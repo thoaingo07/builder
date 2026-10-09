@@ -17,6 +17,7 @@ COPY --from=build /out/api ./
 COPY --from=build /out/migrator /migrator
 ENV ASPNETCORE_URLS=http://+:19100 \
     Storage__DataDirectory=/data
+RUN mkdir -p /data && chown $APP_UID /data
 VOLUME /data
 EXPOSE 19100
 USER $APP_UID
