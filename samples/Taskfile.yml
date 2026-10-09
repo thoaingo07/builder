@@ -1,0 +1,49 @@
+version: '3'
+
+# Example Builder pipeline. Also runnable locally: `task ci`.
+x-builder:
+  entry: ci
+
+tasks:
+  ci:
+    desc: Full pipeline
+    deps: [deploy-staging]
+
+  restore:
+    cmds:
+      - echo "restoring packages on $(hostname)"
+      - sleep 2
+
+  build-api:
+    deps: [restore]
+    x-agent: { labels: [linux] }
+    x-artifacts: [out/api/**]
+    cmds:
+      - mkdir -p out/api
+      - echo "api build {{.BUILDER_COMMIT}}" > out/api/version.txt
+      - sleep 3
+
+  build-web:
+    deps: [restore]
+    cmds:
+      - echo "building web"
+      - sleep 4
+
+  test:
+    deps: [build-api, build-web]
+    cmds:
+      - cat out/api/version.txt
+      - echo "tests passed"
+
+  approve-staging:
+    deps: [test]
+    x-approval:
+      message: Deploy this build to staging?
+
+  deploy-staging:
+    deps: [approve-staging]
+    x-deploy:
+      environment: staging-vps
+      compose: samples/docker-compose.yml
+      project: builder-sample
+      url: http://staging.example.com:8080

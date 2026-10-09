@@ -1,0 +1,15 @@
+bin/
+obj/
+node_modules/
+dist/
+*.user
+.vs/
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.db
+*.db-shm
+*.db-wal
+data/
+.env
+*.pfx
