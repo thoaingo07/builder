@@ -5,7 +5,7 @@ import type { EnvironmentDto } from '@/api/types'
 import * as tf from '@/lib/taskfile'
 import { debounce } from '@/lib/collections'
 
-const props = defineProps<{ task: tf.TaskModel; taskNames: string[]; environments: EnvironmentDto[]; isEntry: boolean }>()
+const props = defineProps<{ task: tf.TaskModel; taskNames: string[]; environments: EnvironmentDto[]; secretNames: string[]; isEntry: boolean }>()
 const emit = defineEmits<{
   mutate: [fn: (doc: Document) => void]
   rename: [from: string, to: string]
@@ -15,7 +15,7 @@ const emit = defineEmits<{
 
 // Local copy so typing isn't interrupted by the YAML round-trip; re-synced when another task is selected.
 const s = reactive({
-  name: '', desc: '', deps: [] as string[], cmds: [] as string[], labels: [] as string[], artifacts: [] as string[],
+  name: '', desc: '', deps: [] as string[], cmds: [] as string[], labels: [] as string[], artifacts: [] as string[], secrets: [] as string[],
   approval: false, approvalMessage: '', approvers: [] as string[],
   deploy: false, deployModel: { environment: '', compose: '', project: '', manifests: '', namespace: '', url: '' } as tf.DeployModel,
 })
@@ -23,7 +23,7 @@ const nameError = ref<string | null>(null)
 
 function sync(t: tf.TaskModel) {
   Object.assign(s, {
-    name: t.name, desc: t.desc, deps: [...t.deps], cmds: t.cmds.map(c => c.text), labels: [...t.labels], artifacts: [...t.artifacts],
+    name: t.name, desc: t.desc, deps: [...t.deps], cmds: t.cmds.map(c => c.text), labels: [...t.labels], artifacts: [...t.artifacts], secrets: [...t.secrets],
     approval: !!t.approval, approvalMessage: t.approval?.message ?? '', approvers: [...(t.approval?.approvers ?? [])],
     deploy: !!t.deploy, deployModel: { ...(t.deploy ?? { environment: '', compose: '', project: '', manifests: '', namespace: '', url: '' }) },
   })
@@ -43,6 +43,10 @@ const applyApproval = debounce(() => apply(d => tf.setApproval(d, name(), s.appr
 const applyDeps = () => apply(d => tf.setDeps(d, name(), s.deps))
 const applyLabels = () => apply(d => tf.setLabels(d, name(), s.labels))
 const applyArtifacts = () => apply(d => tf.setArtifacts(d, name(), s.artifacts))
+const applySecrets = () => apply(d => tf.setSecrets(d, name(), s.secrets))
+// names referenced in the file but not defined in the organization still show (and get flagged)
+const secretItems = computed(() => [...new Set([...props.secretNames, ...s.secrets])].sort())
+const unknownSecrets = computed(() => s.secrets.filter(x => !props.secretNames.includes(x)))
 const applyDeploy = debounce(() => apply(d => tf.setDeploy(d, name(), s.deploy ? s.deployModel : null)), 300)
 
 function commitName() {
@@ -122,6 +126,16 @@ function onDeployToggle(v: boolean) {
 
     <UFormField label="Agent labels" help="x-agent.labels — the agent must have all of them.">
       <UInputTags v-model="s.labels" class="w-full" placeholder="linux, docker…" @update:model-value="applyLabels" />
+    </UFormField>
+
+    <UFormField label="Secrets" help="x-secrets — passed to the task as {{.NAME}} vars and $NAME env, masked in logs.">
+      <USelectMenu
+        v-model="s.secrets" :items="secretItems" multiple class="w-full font-mono" placeholder="No secrets"
+        icon="i-lucide-key-round" @update:model-value="applySecrets"
+      />
+      <template v-if="unknownSecrets.length" #hint>
+        <span class="text-warning">Not defined in this organization: {{ unknownSecrets.join(', ') }}</span>
+      </template>
     </UFormField>
 
     <UFormField label="Artifacts" help="x-artifacts — globs uploaded after success and downloaded by dependents.">

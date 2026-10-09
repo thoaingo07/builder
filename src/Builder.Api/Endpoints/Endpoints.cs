@@ -178,11 +178,13 @@ public static class Endpoints
     {
         var http = context.HttpContext;
         if (!Guid.TryParse(http.Request.Headers[OrgHeader], out var orgId))
-            return Results.Problem(title: "Select an organization (X-Org header).", statusCode: StatusCodes.Status400BadRequest);
+            return Results.Problem(title: "Select an organization (X-Org header).", statusCode: StatusCodes.Status400BadRequest,
+                extensions: new Dictionary<string, object?> { ["code"] = "org_required" });
         var orgs = http.RequestServices.GetRequiredService<OrganizationService>();
         var (userId, role) = await orgs.MembershipAsync(http.User.UserName(), orgId, http.RequestAborted);
         if (role is null)
-            return Results.Problem(title: "Organization not found.", statusCode: StatusCodes.Status404NotFound);
+            return Results.Problem(title: "Organization not found.", statusCode: StatusCodes.Status404NotFound,
+                extensions: new Dictionary<string, object?> { ["code"] = "org_not_found" });
         http.RequestServices.GetRequiredService<ICurrentOrg>().Set(orgId, role.Value, userId);
         return await next(context);
     }

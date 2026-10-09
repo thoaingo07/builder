@@ -25,6 +25,9 @@ const slots = computed(() => `${props.agent.runningJobs.length}/${props.agent.ca
           <div class="truncate font-semibold text-highlighted">{{ agent.name }}</div>
           <div class="truncate text-xs text-muted">{{ agent.hostName || '—' }} · {{ agent.os || 'unknown os' }}</div>
         </div>
+        <UTooltip v-if="agent.shared" text="Shared agent: serves every organization and is managed by the Builder operator.">
+          <UBadge color="info" variant="subtle" size="sm" icon="i-lucide-globe" label="Shared" />
+        </UTooltip>
         <UBadge v-if="!agent.enabled" color="warning" variant="subtle" size="sm" label="Disabled" />
         <UTooltip :text="`${agent.runningJobs.length} running of ${agent.capacity} slots`">
           <UBadge color="neutral" variant="outline" size="sm" icon="i-lucide-layers" :label="slots" />

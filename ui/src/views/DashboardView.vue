@@ -77,7 +77,7 @@ onBeforeUnmount(() => offs.forEach(f => f()))
       <UDashboardNavbar title="Dashboard" icon="i-lucide-layout-dashboard">
         <template #right>
           <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" aria-label="Refresh" @click="load()" />
-          <UButton icon="i-lucide-play" label="Run pipeline" to="/pipelines" />
+          <UButton icon="i-lucide-play" label="Run a runner" to="/pipelines" />
         </template>
       </UDashboardNavbar>
     </template>

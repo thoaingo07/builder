@@ -15,7 +15,7 @@ public sealed class OrganizationService(IAppDbContext db, IClock clock, ICurrent
     public async Task<MeDto> MeAsync(string userName, CancellationToken ct)
     {
         var user = await UserAsync(userName, ct);
-        return new MeDto(new UserDto(user.UserName, user.DisplayName, user.IsAdmin), await OrgsOfAsync(user.Id, ct));
+        return new MeDto(new UserDto(user.UserName, user.DisplayName, user.IsAdmin, user.Email), await OrgsOfAsync(user.Id, ct));
     }
 
     /// <summary>The caller's role in an organization, or null when not a member.</summary>

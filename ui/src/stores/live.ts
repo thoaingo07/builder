@@ -24,6 +24,7 @@ export const useLiveStore = defineStore('live', () => {
   const history = ref<Record<Guid, AgentMetricsDto[]>>({})
   const connection = shallowRef<HubConnection | null>(null)
   const joined = new Map<Guid, number>()
+  let orgId: Guid | null = null
 
   const buildUpdated = new Emitter<[BuildSummaryDto]>()
   const jobUpdated = new Emitter<[JobDto]>()
@@ -71,6 +72,7 @@ export const useLiveStore = defineStore('live', () => {
     conn.onreconnecting(() => { state.value = 'reconnecting' })
     conn.onreconnected(async () => {
       state.value = 'connected'
+      if (orgId) await conn.invoke('JoinOrg', orgId).catch(() => undefined)
       for (const id of joined.keys()) await conn.invoke('JoinBuild', id).catch(() => undefined)
     })
     conn.onclose(() => {
@@ -89,6 +91,7 @@ export const useLiveStore = defineStore('live', () => {
     try {
       await conn.start()
       state.value = 'connected'
+      if (orgId) await conn.invoke('JoinOrg', orgId).catch(() => undefined)
       for (const id of joined.keys()) await conn.invoke('JoinBuild', id).catch(() => undefined)
     } catch {
       state.value = 'disconnected'
@@ -100,8 +103,20 @@ export const useLiveStore = defineStore('live', () => {
     const conn = connection.value
     connection.value = null
     joined.clear()
+    orgId = null
     if (conn) await conn.stop().catch(() => undefined)
     state.value = 'disconnected'
+  }
+
+  /** Switches the organization whose events this connection receives; clears org-scoped live state. */
+  async function joinOrg(id: Guid | null) {
+    if (id === orgId) return
+    orgId = id
+    agents.value = []
+    history.value = {}
+    joined.clear()
+    const conn = connection.value
+    if (id && conn?.state === HubConnectionState.Connected) await conn.invoke('JoinOrg', id).catch(() => undefined)
   }
 
   async function joinBuild(buildId: Guid) {
@@ -119,7 +134,7 @@ export const useLiveStore = defineStore('live', () => {
   }
 
   return {
-    state, agents, history, setAgents, loadHistory, start, stop, joinBuild, leaveBuild,
+    state, agents, history, setAgents, loadHistory, start, stop, joinOrg, joinBuild, leaveBuild,
     onBuild: (h: Handler<[BuildSummaryDto]>) => buildUpdated.on(h),
     onJob: (h: Handler<[JobDto]>) => jobUpdated.on(h),
     onLog: (h: Handler<[Guid, LogLineDto[]]>) => log.on(h),

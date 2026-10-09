@@ -1,0 +1,140 @@
+<script setup lang="ts">
+import { onMounted, reactive, ref } from 'vue'
+import type { FormError, TableColumn } from '@nuxt/ui'
+import { api } from '@/api/client'
+import type { SecretDto } from '@/api/types'
+import { dateTime } from '@/lib/format'
+import { upsert } from '@/lib/collections'
+import { useOrgStore } from '@/stores/org'
+import { useNotify } from '@/composables/useNotify'
+import { useConfirm } from '@/composables/useConfirm'
+
+const org = useOrgStore()
+const notify = useNotify()
+const confirm = useConfirm()
+
+const NAME = /^[A-Z][A-Z0-9_]*$/
+const secrets = ref<SecretDto[]>([])
+const loading = ref(true)
+const formOpen = ref(false)
+const editing = ref<SecretDto | null>(null)
+const saving = ref(false)
+const s = reactive({ name: '', value: '', description: '' })
+
+const columns: TableColumn<SecretDto>[] = [
+  { accessorKey: 'name', header: 'Name' },
+  { accessorKey: 'description', header: 'Description' },
+  { id: 'updated', header: 'Updated' },
+  { id: 'actions', header: '' },
+]
+
+async function load() {
+  try { secrets.value = await api.secrets.list() } catch (e) { notify.error(e, 'Could not load secrets') } finally { loading.value = false }
+}
+
+function openForm(x: SecretDto | null) {
+  if (!org.isAdmin) return
+  editing.value = x
+  Object.assign(s, { name: x?.name ?? '', value: '', description: x?.description ?? '' })
+  formOpen.value = true
+}
+
+function validate(v: typeof s): FormError[] {
+  const errors: FormError[] = []
+  if (!NAME.test(v.name)) errors.push({ name: 'name', message: 'Upper case letters, digits and _ ; must start with a letter' })
+  else if (secrets.value.some(x => x.name === v.name && x.id !== editing.value?.id)) errors.push({ name: 'name', message: 'A secret with this name exists' })
+  if (!editing.value && !v.value) errors.push({ name: 'value', message: 'Required' })
+  return errors
+}
+
+async function submit() {
+  saving.value = true
+  const input = { name: s.name, value: s.value ? s.value : null, description: s.description.trim() || null }
+  try {
+    const saved = editing.value ? await api.secrets.update(editing.value.id, input) : await api.secrets.create(input)
+    secrets.value = upsert(secrets.value, saved, false)
+    notify.success(editing.value ? `Updated ${saved.name}` : `Created ${saved.name}`)
+    formOpen.value = false
+  } catch (e) { notify.error(e, 'Could not save secret') } finally { saving.value = false }
+}
+
+async function remove(x: SecretDto) {
+  if (!await confirm({ title: 'Delete secret', message: `Delete ${x.name}? Runners that list it in x-secrets will fail until it exists again.`, confirmLabel: 'Delete', danger: true })) return
+  try {
+    await api.secrets.remove(x.id)
+    secrets.value = secrets.value.filter(y => y.id !== x.id)
+    notify.success(`Deleted ${x.name}`)
+  } catch (e) { notify.error(e, 'Delete failed') }
+}
+
+onMounted(load)
+</script>
+
+<template>
+  <UDashboardPanel id="secrets">
+    <template #header>
+      <UDashboardNavbar title="Secrets" icon="i-lucide-key-round">
+        <template #right>
+          <UButton v-if="org.isAdmin" icon="i-lucide-plus" label="New secret" @click="openForm(null)" />
+        </template>
+      </UDashboardNavbar>
+    </template>
+
+    <template #body>
+      <UAlert color="neutral" variant="subtle" icon="i-lucide-info" title="Using secrets in a runner">
+        <template #description>
+          List the names a task needs with <code>x-secrets: [DB_PASSWORD]</code> in the runner file. When the job runs,
+          the agent fetches the values and passes them to go-task both as task variables (<code v-pre>{{.DB_PASSWORD}}</code>)
+          and as environment variables (<code>$DB_PASSWORD</code>). Values are masked in build logs and are never shown again after saving.
+        </template>
+      </UAlert>
+
+      <UEmpty
+        v-if="!loading && !secrets.length" icon="i-lucide-key-round" title="No secrets yet"
+        :description="org.isAdmin ? 'Add credentials your runners need, such as registry passwords or API keys.' : 'An admin can add secrets for this organization.'"
+        :actions="org.isAdmin ? [{ label: 'New secret', icon: 'i-lucide-plus', onClick: () => openForm(null) }] : []"
+      />
+      <UCard v-else :ui="{ body: 'p-0 sm:p-0' }">
+        <UTable :data="secrets" :columns="columns" :loading="loading" :ui="{ tr: org.isAdmin ? 'cursor-pointer' : '' }" @select="(_e, row) => openForm(row.original)">
+          <template #name-cell="{ row }"><span class="font-mono font-medium text-highlighted">{{ row.original.name }}</span></template>
+          <template #description-cell="{ row }"><span class="text-sm" :class="row.original.description ? '' : 'text-dimmed'">{{ row.original.description || '—' }}</span></template>
+          <template #updated-cell="{ row }"><span class="text-xs text-muted">{{ dateTime(row.original.updatedAt) }} · {{ row.original.updatedBy }}</span></template>
+          <template #actions-cell="{ row }">
+            <div v-if="org.isAdmin" class="flex justify-end gap-1" @click.stop>
+              <UButton icon="i-lucide-pencil" size="xs" color="neutral" variant="ghost" aria-label="Edit" @click="openForm(row.original)" />
+              <UButton icon="i-lucide-trash-2" size="xs" color="error" variant="ghost" aria-label="Delete" @click="remove(row.original)" />
+            </div>
+          </template>
+        </UTable>
+      </UCard>
+
+      <UModal v-model:open="formOpen" :title="editing ? `Edit ${editing.name}` : 'New secret'">
+        <template #body>
+          <UForm id="secret-form" :state="s" :validate="validate" class="space-y-4" @submit="submit">
+            <UFormField label="Name" name="name" required help="Upper case, e.g. REGISTRY_PASSWORD">
+              <UInput
+                v-model="s.name" class="w-full font-mono" placeholder="REGISTRY_PASSWORD" autocomplete="off"
+                @update:model-value="v => (s.name = String(v).toUpperCase().replace(/[^A-Z0-9_]/g, '_'))"
+              />
+            </UFormField>
+            <UFormField
+              label="Value" name="value" :required="!editing"
+              :help="editing ? 'Stored ✓ — leave empty to keep the current value.' : 'Write-only: it cannot be viewed after saving.'"
+            >
+              <UTextarea v-model="s.value" :rows="3" autoresize class="w-full font-mono" autocomplete="off" spellcheck="false" :placeholder="editing ? '(unchanged)' : ''" />
+            </UFormField>
+            <UFormField label="Description" name="description">
+              <UInput v-model="s.description" class="w-full" placeholder="What it is for" />
+            </UFormField>
+          </UForm>
+        </template>
+        <template #footer>
+          <div class="flex w-full justify-end gap-2">
+            <UButton color="neutral" variant="outline" label="Cancel" @click="formOpen = false" />
+            <UButton type="submit" form="secret-form" :loading="saving" :label="editing ? 'Save' : 'Create'" />
+          </div>
+        </template>
+      </UModal>
+    </template>
+  </UDashboardPanel>
+</template>

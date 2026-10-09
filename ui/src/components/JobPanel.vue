@@ -38,7 +38,7 @@ const facts = computed(() => [
       </div>
     </div>
 
-    <div v-if="job.dependsOn.length || job.labels.length" class="flex flex-wrap items-center gap-1.5 text-xs">
+    <div v-if="job.dependsOn.length || job.labels.length || job.secrets?.length" class="flex flex-wrap items-center gap-1.5 text-xs">
       <template v-if="job.dependsOn.length">
         <span class="text-muted">Depends on</span>
         <UButton
@@ -49,6 +49,10 @@ const facts = computed(() => [
       <template v-if="job.labels.length">
         <span class="ml-2 text-muted">Agent labels</span>
         <UBadge v-for="l in job.labels" :key="l" :label="l" size="sm" color="neutral" variant="outline" class="font-mono" />
+      </template>
+      <template v-if="job.secrets?.length">
+        <span class="ml-2 text-muted">Secrets</span>
+        <UBadge v-for="x in job.secrets" :key="x" :label="x" icon="i-lucide-key-round" size="sm" color="warning" variant="subtle" class="font-mono" />
       </template>
     </div>
 

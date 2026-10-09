@@ -4,28 +4,36 @@ import { useRouter } from 'vue-router'
 import type { DropdownMenuItem, NavigationMenuItem } from '@nuxt/ui'
 import { useAuthStore } from '@/stores/auth'
 import { useLiveStore } from '@/stores/live'
+import { useOrgStore } from '@/stores/org'
+import OrgSwitcher from '@/components/org/OrgSwitcher.vue'
 
 const auth = useAuthStore()
 const live = useLiveStore()
+const org = useOrgStore()
 const router = useRouter()
 
-const nav: NavigationMenuItem[][] = [
+const nav = computed<NavigationMenuItem[][]>(() => [
   [
     { label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/', exact: true },
     { label: 'Builds', icon: 'i-lucide-hammer', to: '/builds' },
-    { label: 'Pipelines', icon: 'i-lucide-workflow', to: '/pipelines' },
+    { label: 'Runners', icon: 'i-lucide-workflow', to: '/pipelines' },
     { label: 'Agents', icon: 'i-lucide-server', to: '/agents' },
   ],
   [
+    { label: 'Repositories', icon: 'i-lucide-folder-git-2', to: '/repositories' },
+    { label: 'Connections', icon: 'i-lucide-plug', to: '/connections' },
+    { label: 'Secrets', icon: 'i-lucide-key-round', to: '/secrets' },
     { label: 'Environments', icon: 'i-lucide-cloud', to: '/environments' },
     { label: 'Deployments', icon: 'i-lucide-rocket', to: '/deployments' },
-    { label: 'Connections', icon: 'i-lucide-git-branch', to: '/connections' },
-    { label: 'Cleanup', icon: 'i-lucide-brush-cleaning', to: '/cleanup' },
   ],
-]
+  [
+    { label: 'Settings', icon: 'i-lucide-settings', to: '/settings' },
+    ...(org.isAdmin ? [{ label: 'Cleanup', icon: 'i-lucide-brush-cleaning', to: '/cleanup' }] : []),
+  ],
+])
 
 const userMenu = computed<DropdownMenuItem[][]>(() => [
-  [{ type: 'label', label: auth.user?.displayName ?? '', description: auth.user?.isAdmin ? 'Administrator' : 'User' }],
+  [{ type: 'label', label: auth.user?.displayName ?? '', description: auth.user?.userName }],
   [{ label: 'Sign out', icon: 'i-lucide-log-out', onSelect: logout }],
 ])
 
@@ -39,6 +47,7 @@ const liveState = computed(() => ({
 async function logout() {
   await live.stop()
   await auth.logout()
+  org.reset()
   await router.push({ name: 'login' })
 }
 </script>
@@ -47,18 +56,15 @@ async function logout() {
   <UDashboardGroup unit="rem">
     <UDashboardSidebar collapsible resizable :default-size="15" :min-size="12" :max-size="20" :ui="{ footer: 'border-t border-default' }">
       <template #header="{ collapsed }">
-        <RouterLink to="/" class="flex items-center gap-2 font-semibold">
-          <span class="flex size-7 items-center justify-center rounded-md bg-primary text-inverted">
-            <UIcon name="i-lucide-blocks" class="size-4" />
-          </span>
-          <span v-if="!collapsed" class="text-highlighted">Builder</span>
-        </RouterLink>
+        <OrgSwitcher :collapsed="collapsed" />
       </template>
 
       <template #default="{ collapsed }">
         <UNavigationMenu :collapsed="collapsed" :items="nav[0]" orientation="vertical" tooltip />
         <USeparator />
         <UNavigationMenu :collapsed="collapsed" :items="nav[1]" orientation="vertical" tooltip />
+        <USeparator />
+        <UNavigationMenu :collapsed="collapsed" :items="nav[2]" orientation="vertical" tooltip />
       </template>
 
       <template #footer="{ collapsed }">
@@ -80,6 +86,7 @@ async function logout() {
       </template>
     </UDashboardSidebar>
 
-    <RouterView />
+    <!-- keyed by organization: switching remounts the page, which reloads its data -->
+    <RouterView :key="org.currentId ?? 'none'" />
   </UDashboardGroup>
 </template>

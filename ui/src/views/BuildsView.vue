@@ -23,7 +23,7 @@ const pipelineId = ref<string>(typeof route.query.pipelineId === 'string' ? rout
 const status = ref<string>(typeof route.query.status === 'string' ? route.query.status : ALL)
 const take = ref(50)
 
-const pipelineItems = computed(() => [{ label: 'All pipelines', value: ALL }, ...pipelines.value.map(p => ({ label: p.name, value: p.id }))])
+const pipelineItems = computed(() => [{ label: 'All runners', value: ALL }, ...pipelines.value.map(p => ({ label: p.name, value: p.id }))])
 const statusItems = [{ label: 'Any status', value: ALL }, ...STATUSES.map(s => ({ label: s, value: s }))]
 
 async function load() {
@@ -68,7 +68,7 @@ onBeforeUnmount(() => off?.())
       <UDashboardNavbar title="Builds" icon="i-lucide-hammer">
         <template #right>
           <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" aria-label="Refresh" :loading="loading" @click="load" />
-          <UButton icon="i-lucide-play" label="Run pipeline" to="/pipelines" />
+          <UButton icon="i-lucide-play" label="Run a runner" to="/pipelines" />
         </template>
       </UDashboardNavbar>
       <UDashboardToolbar>

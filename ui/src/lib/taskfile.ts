@@ -20,6 +20,8 @@ export interface TaskModel {
   simpleCmds: boolean
   labels: string[]
   artifacts: string[]
+  /** x-secrets: organization secret names passed to the task as vars + env */
+  secrets: string[]
   approval: ApprovalModel | null
   deploy: DeployModel | null
 }
@@ -67,7 +69,7 @@ function keyOf(pair: Pair): string {
 function readTask(name: string, node: unknown): TaskModel {
   const t: TaskModel = {
     name, desc: '', deps: [], hasComplexDeps: false, cmds: [], simpleCmds: true,
-    labels: [], artifacts: [], approval: null, deploy: null,
+    labels: [], artifacts: [], secrets: [], approval: null, deploy: null,
   }
   if (isSeq(node)) {
     t.cmds = node.items.map(readCmd)
@@ -89,6 +91,7 @@ function readTask(name: string, node: unknown): TaskModel {
     const agent = node.get('x-agent', true)
     if (isMap(agent)) t.labels = stringList(agent.get('labels', true))
     t.artifacts = stringList(node.get('x-artifacts', true))
+    t.secrets = stringList(node.get('x-secrets', true))
 
     const approval = node.get('x-approval', true)
     if (isMap(approval)) t.approval = { message: str(approval.get('message')), approvers: stringList(approval.get('approvers', true)) }
@@ -208,6 +211,13 @@ export function setArtifacts(doc: Document, task: string, artifacts: string[]) {
   const clean = artifacts.map(a => a.trim()).filter(Boolean)
   if (clean.length) m.set('x-artifacts', flowList(doc, clean))
   else m.delete('x-artifacts')
+}
+
+export function setSecrets(doc: Document, task: string, secrets: string[]) {
+  const m = ensureTaskMap(doc, task)
+  const clean = [...new Set(secrets.map(x => x.trim()).filter(Boolean))]
+  if (clean.length) m.set('x-secrets', flowList(doc, clean))
+  else m.delete('x-secrets')
 }
 
 export function setApproval(doc: Document, task: string, approval: ApprovalModel | null) {

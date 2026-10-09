@@ -18,6 +18,7 @@ defineProps<{ task: TaskModel; selected: boolean; entry: boolean; reachable: boo
       <UIcon v-if="entry" name="i-lucide-flag" class="size-3.5 shrink-0 text-primary" />
       <span class="truncate font-mono text-sm font-semibold text-highlighted">{{ task.name }}</span>
       <span class="flex-1" />
+      <UIcon v-if="task.secrets.length" name="i-lucide-key-round" class="size-3.5 text-muted" />
       <UIcon v-if="task.approval" name="i-lucide-lock" class="size-3.5 text-warning" />
       <UIcon v-if="task.deploy" name="i-lucide-rocket" class="size-3.5 text-primary" />
       <UIcon v-if="task.artifacts.length" name="i-lucide-package" class="size-3.5 text-muted" />

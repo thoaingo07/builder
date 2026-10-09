@@ -7,7 +7,9 @@ import { upsert } from '@/lib/collections'
 import { useNotify } from '@/composables/useNotify'
 import { useConfirm } from '@/composables/useConfirm'
 import EnvironmentFormModal from '@/components/environments/EnvironmentFormModal.vue'
+import { useOrgStore } from '@/stores/org'
 
+const org = useOrgStore()
 const notify = useNotify()
 const confirm = useConfirm()
 const envs = ref<EnvironmentDto[]>([])
@@ -26,9 +28,9 @@ async function load() {
   try { envs.value = await api.environments.list() } catch (e) { notify.error(e, 'Could not load environments') } finally { loading.value = false }
 }
 function create() { editing.value = null; formOpen.value = true }
-function edit(e: EnvironmentDto) { editing.value = e; formOpen.value = true }
+function edit(e: EnvironmentDto) { if (!org.isAdmin) return; editing.value = e; formOpen.value = true }
 async function remove(e: EnvironmentDto) {
-  if (!await confirm({ title: 'Delete environment', message: `Delete "${e.name}"? Pipelines that deploy to it will fail until it exists again. Running apps are not torn down.`, confirmLabel: 'Delete', danger: true })) return
+  if (!await confirm({ title: 'Delete environment', message: `Delete "${e.name}"? Runners that deploy to it will fail until it exists again. Running apps are not torn down.`, confirmLabel: 'Delete', danger: true })) return
   try {
     await api.environments.remove(e.id)
     envs.value = envs.value.filter(x => x.id !== e.id)
@@ -51,7 +53,7 @@ onMounted(load)
       <UDashboardNavbar title="Environments" icon="i-lucide-cloud">
         <template #right>
           <UButton icon="i-lucide-rocket" label="Deployments" color="neutral" variant="outline" to="/deployments" />
-          <UButton icon="i-lucide-plus" label="New environment" @click="create" />
+          <UButton v-if="org.isAdmin" icon="i-lucide-plus" label="New environment" @click="create" />
         </template>
       </UDashboardNavbar>
     </template>
@@ -60,10 +62,10 @@ onMounted(load)
       <UEmpty
         v-if="!loading && !envs.length" icon="i-lucide-cloud" title="No environments"
         description="Add a VPS (SSH + Docker) or a Kubernetes/AKS cluster, then reference it from a task's x-deploy."
-        :actions="[{ label: 'New environment', icon: 'i-lucide-plus', onClick: create }]"
+        :actions="org.isAdmin ? [{ label: 'New environment', icon: 'i-lucide-plus', onClick: create }] : []"
       />
       <UCard v-else :ui="{ body: 'p-0 sm:p-0' }">
-        <UTable :data="envs" :columns="columns" :loading="loading" :ui="{ tr: 'cursor-pointer' }" @select="(_e, row) => edit(row.original)">
+        <UTable :data="envs" :columns="columns" :loading="loading" :ui="{ tr: org.isAdmin ? 'cursor-pointer' : '' }" @select="(_e, row) => edit(row.original)">
           <template #name-cell="{ row }"><span class="font-mono font-medium text-highlighted">{{ row.original.name }}</span></template>
           <template #type-cell="{ row }">
             <div class="flex items-center gap-2">
@@ -83,7 +85,7 @@ onMounted(load)
             </div>
           </template>
           <template #actions-cell="{ row }">
-            <div class="flex justify-end gap-1" @click.stop>
+            <div v-if="org.isAdmin" class="flex justify-end gap-1" @click.stop>
               <UButton icon="i-lucide-pencil" size="xs" color="neutral" variant="ghost" aria-label="Edit" @click="edit(row.original)" />
               <UButton icon="i-lucide-trash-2" size="xs" color="error" variant="ghost" aria-label="Delete" @click="remove(row.original)" />
             </div>

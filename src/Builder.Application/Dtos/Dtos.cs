@@ -5,7 +5,7 @@ using Builder.Domain.Organizations;
 
 namespace Builder.Application.Dtos;
 
-public sealed record UserDto(string UserName, string DisplayName, bool IsAdmin);
+public sealed record UserDto(string UserName, string DisplayName, bool IsAdmin, string? Email = null);
 
 public sealed record JobCounts(int Total, int Pending, int Running, int WaitingApproval, int Succeeded, int Failed, int Skipped, int Canceled);
 

@@ -21,6 +21,7 @@ const confirm = useConfirm()
 
 const pipeline = ref<PipelineDto | null>(null)
 const environments = ref<EnvironmentDto[]>([])
+const secretNames = ref<string[]>([])
 const branch = ref('')
 const loadedBranch = ref('')
 const commit = ref<string | null>(null)
@@ -72,7 +73,7 @@ const reachable = computed(() => {
 const status = computed(() => {
   if (parseErrors.value.length) return { color: 'error' as const, icon: 'i-lucide-circle-x', text: 'YAML error' }
   if (planning.value) return { color: 'neutral' as const, icon: 'i-lucide-loader-circle', text: 'Validating…' }
-  if (plan.value?.error) return { color: 'error' as const, icon: 'i-lucide-circle-x', text: 'Invalid pipeline' }
+  if (plan.value?.error) return { color: 'error' as const, icon: 'i-lucide-circle-x', text: 'Invalid runner file' }
   if (plan.value) return { color: 'success' as const, icon: 'i-lucide-circle-check', text: `${plan.value.jobs.length} jobs from “${plan.value.entryTask}”` }
   return { color: 'neutral' as const, icon: 'i-lucide-circle-dashed', text: 'Not validated' }
 })
@@ -143,8 +144,8 @@ async function load(b?: string) {
       missingFile.value = true
       loadedBranch.value = branch.value = b || pipeline.value?.defaultBranch || 'main'
       commit.value = null
-      baseline.value = ''
-      content.value = tf.STARTER
+      // don't silently fill in a template: the user decides (see the empty state)
+      content.value = baseline.value = ''
     } else {
       loadError.value = e instanceof ApiError ? (e.problem.detail ?? e.message) : (e as Error).message
     }
@@ -153,6 +154,10 @@ async function load(b?: string) {
     selected.value = null
     validate()
   }
+}
+
+function startFromTemplate() {
+  content.value = tf.STARTER
 }
 
 async function reload() {
@@ -200,6 +205,7 @@ onMounted(async () => {
     return
   }
   void api.environments.list().then(r => { environments.value = r }).catch(() => undefined)
+  void api.secrets.list().then(r => { secretNames.value = r.map(x => x.name) }).catch(() => undefined)
   await load(pipeline.value.defaultBranch)
 })
 onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
@@ -208,9 +214,9 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
 <template>
   <UDashboardPanel id="pipeline-editor" :ui="{ body: 'p-0 sm:p-0 gap-0 overflow-hidden' }">
     <template #header>
-      <UDashboardNavbar :title="pipeline ? `${pipeline.name} · Taskfile` : 'Taskfile editor'">
+      <UDashboardNavbar :title="pipeline ? `${pipeline.name} · runner file` : 'Runner file'">
         <template #leading>
-          <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" to="/pipelines" aria-label="Back to pipelines" />
+          <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" to="/pipelines" aria-label="Back to runners" />
         </template>
         <template #trailing>
           <UBadge v-if="dirty" color="warning" variant="subtle" label="Unsaved" size="sm" />
@@ -224,7 +230,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
           <UInput v-model="branch" icon="i-lucide-git-branch" size="sm" class="w-44" @keydown.enter="reload" />
           <UButton icon="i-lucide-refresh-cw" size="sm" color="neutral" variant="ghost" aria-label="Reload from git" :loading="loading" @click="reload" />
           <span v-if="commit" class="font-mono text-xs text-muted">{{ shortSha(commit) }}</span>
-          <span class="hidden font-mono text-xs text-dimmed md:inline">{{ pipeline?.taskfilePath }}</span>
+          <span class="hidden font-mono text-xs text-dimmed md:inline">{{ pipeline?.repositoryName }} · {{ pipeline?.taskfilePath }}</span>
         </template>
         <template #right>
           <UTooltip :text="plan?.error ?? parseErrors[0] ?? status.text">
@@ -240,13 +246,23 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
       <div v-else-if="loadError" class="p-6">
         <UEmpty icon="i-lucide-circle-alert" title="Could not load the Taskfile" :description="loadError" :actions="[{ label: 'Retry', icon: 'i-lucide-refresh-cw', onClick: () => load(branch) }]" />
       </div>
+      <div v-else-if="missingFile && !content" class="p-6">
+        <UEmpty
+          icon="i-lucide-file-x-2" :title="`${pipeline?.taskfilePath} does not exist on ${loadedBranch}`"
+          description="The runner is mapped to this file, but the branch doesn't contain it. Pick another branch above, or create the file from a starter template and commit it to this branch."
+          :actions="[
+            { label: 'Create from starter template', icon: 'i-lucide-file-plus', onClick: startFromTemplate },
+            { label: 'Default branch', icon: 'i-lucide-git-branch', color: 'neutral', variant: 'outline', onClick: () => load(pipeline?.defaultBranch) },
+          ]"
+        />
+      </div>
       <template v-else>
         <UAlert
           v-if="missingFile" color="info" variant="subtle" icon="i-lucide-file-plus" class="rounded-none"
-          :title="`${pipeline?.taskfilePath} does not exist on ${loadedBranch}`" description="Started from a template — commit to create it."
+          :title="`New file: ${pipeline?.taskfilePath} on ${loadedBranch}`" description="Started from the starter template — commit to create it in the repository."
         />
         <UAlert
-          v-if="plan?.error" color="error" variant="subtle" icon="i-lucide-circle-x" class="rounded-none" title="Pipeline is invalid" :description="plan.error"
+          v-if="plan?.error" color="error" variant="subtle" icon="i-lucide-circle-x" class="rounded-none" title="Runner file is invalid" :description="plan.error"
         />
         <UAlert
           v-if="parseErrors.length" color="error" variant="subtle" icon="i-lucide-file-x" class="rounded-none"
@@ -274,7 +290,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
               />
             </div>
             <div v-if="!model.tasks.length" class="absolute inset-0 flex items-center justify-center">
-              <UEmpty icon="i-lucide-workflow" title="No tasks" description="Add a task to start building the pipeline." variant="naked" />
+              <UEmpty icon="i-lucide-workflow" title="No tasks" description="Add a task to start building the runner." variant="naked" />
             </div>
             <TaskGraphEditor
               ref="graph" :model="model" :entry="model.entry || effectiveEntry" :reachable="reachable" :selected="selected"
@@ -287,7 +303,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
           </div>
           <aside class="max-h-[60vh] w-full overflow-y-auto border-t border-default p-4 lg:max-h-none lg:w-96 lg:border-t-0 lg:border-l">
             <TaskForm
-              v-if="selectedTask" :task="selectedTask" :task-names="taskNames" :environments="environments"
+              v-if="selectedTask" :task="selectedTask" :task-names="taskNames" :environments="environments" :secret-names="secretNames"
               :is-entry="model.entry === selectedTask.name"
               @mutate="mutate" @rename="rename" @remove="removeTask" @set-entry="makeEntry"
             />

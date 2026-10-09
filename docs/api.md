@@ -4,7 +4,8 @@ The browser only talks to the **BFF** (same origin). Everything under `/api/*` a
 API. JSON is camelCase, enums are strings, dates are ISO-8601. Every non-GET `/api` and `/bff` request from the
 browser must send header `X-CSRF: 1`. Errors: `{ "title": string, "detail"?: string, "status": number }`
 (ProblemDetails). 401 = signed out, 403 = role too low, 404 = not found **or not in your organization**,
-409 = business rule, 502 = Azure DevOps / git host problem (message is user-facing).
+409 = business rule, 502 = Azure DevOps / git host problem (message is user-facing). A missing or foreign `X-Org`
+returns a ProblemDetails with `code: "org_required"` (400) or `code: "org_not_found"` (404).
 
 ## Organizations
 
@@ -29,7 +30,7 @@ return 400; with an organization the user is not a member of, 404. Roles: `Membe
 ## Types
 
 ```ts
-type UserDto = { userName: string; displayName: string; isAdmin: boolean }
+type UserDto = { userName: string; displayName: string; isAdmin: boolean; email?: string|null }
 
 type OrgRole = 'Member'|'Admin'|'Owner'
 type OrgDto = { id; name; slug; role: OrgRole; memberCount: number; createdAt }

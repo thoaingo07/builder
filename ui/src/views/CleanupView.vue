@@ -7,8 +7,10 @@ import { useLiveStore } from '@/stores/live'
 import { useNotify } from '@/composables/useNotify'
 import { useConfirm } from '@/composables/useConfirm'
 import AgentCleanupModal from '@/components/AgentCleanupModal.vue'
+import { useOrgStore } from '@/stores/org'
 
 const live = useLiveStore()
+const org = useOrgStore()
 const notify = useNotify()
 const confirm = useConfirm()
 
@@ -17,12 +19,13 @@ const busy = ref(false)
 const result = ref<CleanupResultDto | null>(null)
 const agentModal = ref(false)
 const agent = ref<AgentDto | null>(null)
-const onlineAgents = computed(() => live.agents.filter(a => a.online))
+// shared agents are cleaned up by the operator, not by an organization
+const onlineAgents = computed(() => live.agents.filter(a => a.online && !a.shared))
 
 async function run() {
   if (!await confirm({
     title: 'Run cleanup',
-    message: `Delete finished builds older than ${s.olderThanDays} days (keeping the newest ${s.keepLastPerPipeline} per pipeline), with their logs and artifacts.${s.removeWorkspaces || s.dockerPrune ? '\nOnline agents will also clean up.' : ''}`,
+    message: `Delete finished builds older than ${s.olderThanDays} days (keeping the newest ${s.keepLastPerPipeline} per runner), with their logs and artifacts.${s.removeWorkspaces || s.dockerPrune ? '\nOnline agents will also clean up.' : ''}`,
     confirmLabel: 'Clean up', danger: true,
   })) return
   busy.value = true
@@ -44,7 +47,11 @@ onMounted(async () => {
     </template>
 
     <template #body>
-      <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
+      <UEmpty
+        v-if="!org.isAdmin" icon="i-lucide-shield" title="Admins only"
+        description="Cleaning up builds, artifacts and agent workspaces needs the Admin role in this organization."
+      />
+      <div v-else class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
         <UCard>
           <template #header>
             <h2 class="font-semibold text-highlighted">Builds, logs & artifacts</h2>
@@ -55,7 +62,7 @@ onMounted(async () => {
               <UFormField label="Older than (days)" name="olderThanDays">
                 <UInputNumber v-model="s.olderThanDays" :min="0" class="w-full" />
               </UFormField>
-              <UFormField label="Always keep newest per pipeline" name="keepLastPerPipeline">
+              <UFormField label="Always keep newest per runner" name="keepLastPerPipeline">
                 <UInputNumber v-model="s.keepLastPerPipeline" :min="0" class="w-full" />
               </UFormField>
             </div>

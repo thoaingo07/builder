@@ -7,99 +7,106 @@ import type { PipelineDto } from '@/api/types'
 import { relativeTime } from '@/lib/format'
 import { upsert } from '@/lib/collections'
 import { useLiveStore } from '@/stores/live'
+import { useOrgStore } from '@/stores/org'
 import { useNotify } from '@/composables/useNotify'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNow } from '@/composables/useNow'
 import StatusBadge from '@/components/StatusBadge.vue'
-import PipelineFormModal from '@/components/pipelines/PipelineFormModal.vue'
+import RunnerEditModal from '@/components/pipelines/RunnerEditModal.vue'
 import RunPipelineModal from '@/components/pipelines/RunPipelineModal.vue'
 
+// "Runners": each one is a mapped runner file (.builder/runners/*.yml) in a repository.
 const router = useRouter()
 const live = useLiveStore()
+const org = useOrgStore()
 const notify = useNotify()
 const confirm = useConfirm()
 const now = useNow(10000)
 
-const pipelines = ref<PipelineDto[]>([])
+const runners = ref<PipelineDto[]>([])
 const loading = ref(true)
-const formOpen = ref(false)
+const editOpen = ref(false)
 const runOpen = ref(false)
 const editing = ref<PipelineDto | null>(null)
 const running = ref<PipelineDto | null>(null)
 
 const columns: TableColumn<PipelineDto>[] = [
-  { accessorKey: 'name', header: 'Pipeline' },
+  { accessorKey: 'name', header: 'Runner' },
   { id: 'repo', header: 'Repository' },
   { id: 'last', header: 'Last build' },
   { id: 'actions', header: '' },
 ]
 
 async function load() {
-  try { pipelines.value = await api.pipelines.list() } catch (e) { notify.error(e, 'Could not load pipelines') } finally { loading.value = false }
+  try { runners.value = await api.pipelines.list() } catch (e) { notify.error(e, 'Could not load runners') } finally { loading.value = false }
 }
 
-function create() { editing.value = null; formOpen.value = true }
-function edit(p: PipelineDto) { editing.value = p; formOpen.value = true }
+function edit(p: PipelineDto) { editing.value = p; editOpen.value = true }
 function run(p: PipelineDto) { running.value = p; runOpen.value = true }
 
-async function remove(p: PipelineDto) {
-  if (!await confirm({ title: 'Delete pipeline', message: `Delete "${p.name}" and all of its builds? The Taskfile in git is not touched.`, confirmLabel: 'Delete', danger: true })) return
+async function unmap(p: PipelineDto) {
+  if (!await confirm({
+    title: 'Unmap runner',
+    message: `Unmap "${p.name}"? Its builds are deleted. ${p.taskfilePath} stays in the repository and can be mapped again.`,
+    confirmLabel: 'Unmap', danger: true,
+  })) return
   try {
     await api.pipelines.remove(p.id)
-    pipelines.value = pipelines.value.filter(x => x.id !== p.id)
-    notify.success(`Deleted ${p.name}`)
-  } catch (e) { notify.error(e, 'Delete failed') }
+    runners.value = runners.value.filter(x => x.id !== p.id)
+    notify.success(`Unmapped ${p.name}`)
+  } catch (e) { notify.error(e, 'Unmap failed') }
 }
 
 function menu(p: PipelineDto): DropdownMenuItem[][] {
-  return [
-    [
-      { label: 'Edit Taskfile', icon: 'i-lucide-workflow', onSelect: () => void router.push(`/pipelines/${p.id}/editor`) },
-      { label: 'Settings', icon: 'i-lucide-settings', onSelect: () => edit(p) },
-      { label: 'Builds', icon: 'i-lucide-hammer', onSelect: () => void router.push({ path: '/builds', query: { pipelineId: p.id } }) },
-    ],
-    [{ label: 'Delete', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => void remove(p) }],
-  ]
+  const groups: DropdownMenuItem[][] = [[
+    { label: 'Edit runner file', icon: 'i-lucide-file-code-2', onSelect: () => void router.push(`/pipelines/${p.id}/editor`) },
+    { label: 'Builds', icon: 'i-lucide-hammer', onSelect: () => void router.push({ path: '/builds', query: { pipelineId: p.id } }) },
+    { label: 'Repository', icon: 'i-lucide-folder-git-2', onSelect: () => void router.push(`/repositories/${p.repositoryId}`) },
+  ]]
+  if (org.isAdmin) {
+    groups[0].splice(1, 0, { label: 'Name & entry task', icon: 'i-lucide-pencil', onSelect: () => edit(p) })
+    groups.push([{ label: 'Unmap', icon: 'i-lucide-unlink', color: 'error', onSelect: () => void unmap(p) }])
+  }
+  return groups
 }
 
 let off: (() => void) | undefined
 onMounted(() => {
   void load()
   off = live.onBuild(b => {
-    const p = pipelines.value.find(x => x.id === b.pipelineId)
-    if (p && (!p.lastBuild || p.lastBuild.number <= b.number)) pipelines.value = upsert(pipelines.value, { ...p, lastBuild: b })
+    const p = runners.value.find(x => x.id === b.pipelineId)
+    if (p && (!p.lastBuild || p.lastBuild.number <= b.number)) runners.value = upsert(runners.value, { ...p, lastBuild: b })
   })
 })
 onBeforeUnmount(() => off?.())
 </script>
 
 <template>
-  <UDashboardPanel id="pipelines">
+  <UDashboardPanel id="runners">
     <template #header>
-      <UDashboardNavbar title="Pipelines" icon="i-lucide-workflow">
+      <UDashboardNavbar title="Runners" icon="i-lucide-workflow">
         <template #right>
-          <UButton icon="i-lucide-plus" label="New pipeline" @click="create" />
+          <UButton v-if="org.isAdmin" icon="i-lucide-link-2" label="Map runner files" color="neutral" variant="outline" to="/repositories" />
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
       <UEmpty
-        v-if="!loading && !pipelines.length" icon="i-lucide-workflow" title="No pipelines yet"
-        description="Point Builder at a repository with a Taskfile.yml to get started."
-        :actions="[{ label: 'New pipeline', icon: 'i-lucide-plus', onClick: create }]"
+        v-if="!loading && !runners.length" icon="i-lucide-workflow" title="No runners yet"
+        description="A runner is a Taskfile in a repository's .builder/runners/ folder. Add the repository, then map its runner files."
+        :actions="[{ label: 'Repositories', icon: 'i-lucide-folder-git-2', to: '/repositories' }]"
       />
       <UCard v-else :ui="{ body: 'p-0 sm:p-0' }">
-        <UTable :data="pipelines" :columns="columns" :loading="loading">
+        <UTable :data="runners" :columns="columns" :loading="loading">
           <template #name-cell="{ row }">
             <RouterLink :to="`/pipelines/${row.original.id}/editor`" class="font-medium text-highlighted hover:text-primary">{{ row.original.name }}</RouterLink>
-            <div class="font-mono text-xs text-muted">{{ row.original.taskfilePath }}<template v-if="row.original.entryTask"> → {{ row.original.entryTask }}</template></div>
+            <div v-if="row.original.entryTask" class="font-mono text-xs text-muted">→ {{ row.original.entryTask }}</div>
           </template>
           <template #repo-cell="{ row }">
-            <div class="max-w-md truncate font-mono text-xs">{{ row.original.repositoryUrl }}</div>
-            <div class="flex items-center gap-1 text-xs text-muted">
-              <UIcon name="i-lucide-git-branch" />{{ row.original.defaultBranch }}
-              <template v-if="row.original.connectionName"> · <UIcon name="i-lucide-key-round" />{{ row.original.connectionName }}</template>
+            <RouterLink :to="`/repositories/${row.original.repositoryId}`" class="text-sm hover:text-primary">{{ row.original.repositoryName }}</RouterLink>
+            <div class="flex items-center gap-1 font-mono text-xs text-muted">
+              {{ row.original.taskfilePath }} · <UIcon name="i-lucide-git-branch" />{{ row.original.defaultBranch }}
             </div>
           </template>
           <template #last-cell="{ row }">
@@ -120,7 +127,7 @@ onBeforeUnmount(() => off?.())
         </UTable>
       </UCard>
 
-      <PipelineFormModal v-model:open="formOpen" :pipeline="editing" @saved="p => (pipelines = upsert(pipelines, p, false))" />
+      <RunnerEditModal v-model:open="editOpen" :runner="editing" @saved="p => (runners = upsert(runners, p, false))" />
       <RunPipelineModal v-model:open="runOpen" :pipeline="running" />
     </template>
   </UDashboardPanel>

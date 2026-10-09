@@ -13,12 +13,20 @@ const notify = useNotify()
 const state = reactive({ branch: '', entryTask: '' })
 const vars = ref<{ key: string; value: string }[]>([])
 const busy = ref(false)
+const branches = ref<string[]>([])
+const loadingBranches = ref(false)
 
-watch(open, o => {
+watch(open, async o => {
   if (!o || !props.pipeline) return
   state.branch = props.pipeline.defaultBranch
   state.entryTask = props.pipeline.entryTask ?? ''
   vars.value = []
+  branches.value = []
+  loadingBranches.value = true
+  try {
+    branches.value = await api.repositories.branches(props.pipeline.repositoryId)
+    if (!branches.value.includes(state.branch) && branches.value.length) state.branch = branches.value[0]
+  } catch { /* free-text branch still works */ } finally { loadingBranches.value = false }
 })
 
 async function run() {
@@ -41,12 +49,16 @@ async function run() {
 </script>
 
 <template>
-  <UModal v-model:open="open" :title="`Run ${pipeline?.name ?? ''}`" description="Queue a new build.">
+  <UModal v-model:open="open" :title="`Run ${pipeline?.name ?? ''}`" :description="pipeline ? `${pipeline.repositoryName} · ${pipeline.taskfilePath}` : undefined">
     <template #body>
       <UForm id="run-form" :state="state" class="space-y-4" @submit="run">
         <div class="grid gap-4 sm:grid-cols-2">
           <UFormField label="Branch" name="branch">
-            <UInput v-model="state.branch" icon="i-lucide-git-branch" class="w-full" />
+            <USelectMenu
+              v-if="branches.length" v-model="state.branch" :items="branches" icon="i-lucide-git-branch" class="w-full"
+              :create-item="{ position: 'bottom' }" @create="(b: string) => { branches.push(b); state.branch = b }"
+            />
+            <UInput v-else v-model="state.branch" icon="i-lucide-git-branch" class="w-full" :loading="loadingBranches" />
           </UFormField>
           <UFormField label="Entry task" name="entryTask" :help="pipeline?.entryTask ? undefined : 'Empty = Taskfile default'">
             <UInput v-model="state.entryTask" class="w-full font-mono" placeholder="ci" />

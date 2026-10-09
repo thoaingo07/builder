@@ -1,7 +1,9 @@
 import type {
   AgentDto, AgentMetricsDto, BuildDetailDto, BuildStatus, BuildSummaryDto, CleanupInput, CleanupResultDto,
-  ConnectionDto, ConnectionInput, DashboardDto, DeploymentDto, EnvironmentDto, EnvironmentInput, Guid, JobDto,
-  LogLineDto, PipelineDto, PipelineInput, PlanPreviewDto, ProblemDetails, RepositoryDto, TaskfileDto, UserDto,
+  ConnectionDto, ConnectionInput, ConnectionTestDto, DashboardDto, DeploymentDto, EnvironmentDto, EnvironmentInput,
+  Guid, JobDto, LogLineDto, MapRunnersInput, MeDto, MemberDto, OrgCreatedDto, OrgDto, OrgRole, PipelineDto,
+  PipelineInput, PlanPreviewDto, ProblemDetails, RemoteRepositoryDto, RepositoryDto, RepositoryInput,
+  RunnerFilesDto, SecretDto, SecretInput, TaskfileDto, UserDto,
 } from './types'
 
 export class ApiError extends Error {
@@ -14,6 +16,14 @@ export class ApiError extends Error {
 let onUnauthorized: (() => void) | null = null
 export function setUnauthorizedHandler(handler: () => void) { onUnauthorized = handler }
 
+/** The current organization, sent as `X-Org` on org-scoped calls. Set by the org store. */
+let currentOrgId: string | null = null
+export function setCurrentOrg(id: string | null) { currentOrgId = id }
+
+/** Called when the API says the X-Org organization is missing or not ours (400/404 about the organization). */
+let onOrgInvalid: (() => void) | null = null
+export function setOrgInvalidHandler(handler: () => void) { onOrgInvalid = handler }
+
 type Query = Record<string, string | number | boolean | null | undefined>
 
 function withQuery(path: string, query?: Query) {
@@ -24,9 +34,17 @@ function withQuery(path: string, query?: Query) {
   return s ? `${path}?${s}` : path
 }
 
+/** Personal endpoints that must not carry X-Org. */
+function isPersonal(method: string, path: string) {
+  return path === '/api/me' || (method === 'POST' && path === '/api/orgs')
+}
+
+
 async function request<T>(method: string, path: string, body?: unknown, query?: Query): Promise<T> {
   const headers: Record<string, string> = { 'X-CSRF': '1', Accept: 'application/json' }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
+  const orgScoped = path.startsWith('/api/') && !isPersonal(method, path)
+  if (orgScoped && currentOrgId) headers['X-Org'] = currentOrgId
   const res = await fetch(withQuery(path, query), {
     method, headers, credentials: 'same-origin',
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -42,6 +60,8 @@ async function request<T>(method: string, path: string, body?: unknown, query?: 
     } catch { /* ignore */ }
     if (problem.errors && !problem.detail)
       problem.detail = Object.values(problem.errors).flat().join(' ')
+    if (orgScoped && (problem.code === 'org_required' || problem.code === 'org_not_found'))
+      onOrgInvalid?.()
     throw new ApiError(res.status, problem)
   }
   if (res.status === 204 || res.status === 202) return undefined as T
@@ -61,12 +81,24 @@ export const bff = {
 }
 
 export const api = {
+  me: () => get<MeDto>('/api/me'),
+  createOrg: (name: string) => post<OrgCreatedDto>('/api/orgs', { name }),
+
+  org: {
+    rename: (name: string) => put<OrgDto>('/api/org', { name }),
+    regenerateAgentToken: () => post<{ agentToken: string }>('/api/org/agent-token'),
+    members: () => get<MemberDto[]>('/api/org/members'),
+    addMember: (email: string, role: OrgRole) => post<MemberDto>('/api/org/members', { email, role }),
+    setRole: (userId: Guid, role: OrgRole) => put<MemberDto>(`/api/org/members/${userId}`, { role }),
+    removeMember: (userId: Guid) => del(`/api/org/members/${userId}`),
+  },
+
   dashboard: () => get<DashboardDto>('/api/dashboard'),
 
+  /** Runners (one mapped runner file each); the API path stays /pipelines. */
   pipelines: {
     list: () => get<PipelineDto[]>('/api/pipelines'),
     get: (id: Guid) => get<PipelineDto>(`/api/pipelines/${id}`),
-    create: (input: PipelineInput) => post<PipelineDto>('/api/pipelines', input),
     update: (id: Guid, input: PipelineInput) => put<PipelineDto>(`/api/pipelines/${id}`, input),
     remove: (id: Guid) => del(`/api/pipelines/${id}`),
     taskfile: (id: Guid, branch?: string) => get<TaskfileDto>(`/api/pipelines/${id}/taskfile`, { branch }),
@@ -76,6 +108,24 @@ export const api = {
       post<PlanPreviewDto>('/api/pipelines/plan', { content, entryTask: entryTask || null }),
     run: (id: Guid, input: { branch?: string | null; entryTask?: string | null; variables?: Record<string, string> }) =>
       post<BuildSummaryDto>(`/api/pipelines/${id}/builds`, input),
+  },
+
+  repositories: {
+    list: () => get<RepositoryDto[]>('/api/repositories'),
+    get: (id: Guid) => get<RepositoryDto>(`/api/repositories/${id}`),
+    create: (input: RepositoryInput) => post<RepositoryDto>('/api/repositories', input),
+    update: (id: Guid, input: RepositoryInput) => put<RepositoryDto>(`/api/repositories/${id}`, input),
+    remove: (id: Guid) => del(`/api/repositories/${id}`),
+    branches: (id: Guid) => get<string[]>(`/api/repositories/${id}/branches`),
+    runnerFiles: (id: Guid, branch?: string | null) => get<RunnerFilesDto>(`/api/repositories/${id}/runner-files`, { branch }),
+    mapRunners: (id: Guid, input: MapRunnersInput) => post<PipelineDto[]>(`/api/repositories/${id}/runners`, input),
+  },
+
+  secrets: {
+    list: () => get<SecretDto[]>('/api/secrets'),
+    create: (input: SecretInput) => post<SecretDto>('/api/secrets', input),
+    update: (id: Guid, input: SecretInput) => put<SecretDto>(`/api/secrets/${id}`, input),
+    remove: (id: Guid) => del(`/api/secrets/${id}`),
   },
 
   builds: {
@@ -118,7 +168,11 @@ export const api = {
     create: (input: ConnectionInput) => post<ConnectionDto>('/api/connections', input),
     update: (id: Guid, input: ConnectionInput) => put<ConnectionDto>(`/api/connections/${id}`, input),
     remove: (id: Guid) => del(`/api/connections/${id}`),
-    repositories: (id: Guid) => get<RepositoryDto[]>(`/api/connections/${id}/repositories`),
+    test: (id: Guid) => post<ConnectionTestDto>(`/api/connections/${id}/test`),
+    projects: (id: Guid) => get<string[]>(`/api/connections/${id}/projects`),
+    repositories: (id: Guid, project?: string | null) =>
+      get<RemoteRepositoryDto[]>(`/api/connections/${id}/repositories`, { project }),
+    branches: (id: Guid, url: string) => get<string[]>(`/api/connections/${id}/branches`, { url }),
   },
 
   cleanup: (input: CleanupInput) => post<CleanupResultDto>('/api/cleanup', input),
