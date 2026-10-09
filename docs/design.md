@@ -35,7 +35,10 @@ Dependencies point inward only: `Api/Bff/Infrastructure → Application → Doma
 | `Builder.Migrations` | Schema owner: FluentMigrator running raw SQL pairs `db/migrations/{000001}_{title}.{up,down}.sql` (embedded). Console (`up`, `down <version>`, `rollback [n]`, `status`) and library (the API migrates on startup). |
 | `Builder.Contracts` | Agent ⇄ API wire protocol (shared by Application, Api and Agent). |
 | `Builder.Agent` | Worker service: metrics, checkout, run go-task, deploy actions, artifacts, cleanup. |
-| `ui/` | Vue 3 + Vite + TypeScript + Pinia + Vue Flow. Talks only to the BFF. |
+| `ui/` | Vue 3 + Vite + TypeScript + Nuxt UI (components only, no Nuxt server) + Pinia + Vue Flow. Talks only to the BFF. |
+| `Builder.AppHost` | .NET Aspire orchestration for local dev and integration tests (PostgreSQL, migrator, API, BFF, agents, Vite). |
+
+Runtime packaging: `deploy/containers/*.Containerfile` + `deploy/compose.yml` (Podman or Docker).
 
 ## Pipelines are Taskfiles
 

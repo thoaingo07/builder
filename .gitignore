@@ -13,3 +13,4 @@ dist/
 data/
 .env
 *.pfx
+deploy/.env

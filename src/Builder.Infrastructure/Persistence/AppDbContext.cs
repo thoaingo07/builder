@@ -74,6 +74,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
         m.Entity<User>(e => e.ToTable("users"));
 
+        // relationships without navigations, mirroring the FKs in db/migrations (also orders inserts)
+        m.Entity<Pipeline>().HasOne<GitConnection>().WithMany().HasForeignKey(p => p.ConnectionId).OnDelete(DeleteBehavior.Restrict);
+        m.Entity<Build>().HasOne<Pipeline>().WithMany().HasForeignKey(b => b.PipelineId).OnDelete(DeleteBehavior.Restrict);
+        m.Entity<LogLine>().HasOne<Build>().WithMany().HasForeignKey(l => l.BuildId).OnDelete(DeleteBehavior.Cascade);
+        m.Entity<LogLine>().HasOne<BuildJob>().WithMany().HasForeignKey(l => l.JobId).OnDelete(DeleteBehavior.Cascade);
+        m.Entity<Artifact>().HasOne<Build>().WithMany().HasForeignKey(a => a.BuildId).OnDelete(DeleteBehavior.Cascade);
+        m.Entity<Artifact>().HasOne<BuildJob>().WithMany().HasForeignKey(a => a.JobId).OnDelete(DeleteBehavior.Cascade);
+
         // Ids are assigned by the domain (Guid v7). Without this EF would treat a new child added to a
         // tracked aggregate (e.g. a job added to a build) as an existing row and issue an UPDATE.
         foreach (var key in m.Model.GetEntityTypes().Select(t => t.FindPrimaryKey()).OfType<Microsoft.EntityFrameworkCore.Metadata.IMutableKey>())

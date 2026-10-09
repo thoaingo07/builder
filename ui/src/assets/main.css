@@ -1,0 +1,32 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+@source "../";
+
+/* Only what Nuxt UI doesn't cover: Vue Flow theming, the log viewer, CodeMirror sizing. */
+
+:root {
+  --log-bg: #0f141c;
+  --log-text: #d6dde8;
+}
+
+.vue-flow__minimap { background: var(--ui-bg-elevated) !important; }
+.vue-flow__controls-button {
+  background: var(--ui-bg-elevated) !important;
+  border-color: var(--ui-border) !important;
+  fill: var(--ui-text) !important;
+  color: var(--ui-text) !important;
+}
+.vue-flow__edge-path { stroke: var(--ui-border-accented); }
+.vue-flow__edge.selected .vue-flow__edge-path { stroke: var(--ui-primary); stroke-width: 2.5; }
+.vue-flow__handle { background: var(--ui-border-accented); border-color: var(--ui-bg); width: 9px; height: 9px; }
+.vue-flow__background { background: var(--ui-bg-muted); }
+
+/* ANSI colors in build logs */
+.ansi-bold { font-weight: 700; }
+.ansi-red { color: #ff7b72; } .ansi-green { color: #7ee787; } .ansi-yellow { color: #f2cc60; }
+.ansi-blue { color: #79c0ff; } .ansi-magenta { color: #d2a8ff; } .ansi-cyan { color: #76e3ea; }
+.ansi-white { color: #f0f6fc; } .ansi-gray { color: #8b949e; } .ansi-black { color: #6e7681; }
+
+.cm-editor { height: 100%; font-size: 12.5px; }
+.cm-editor .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }

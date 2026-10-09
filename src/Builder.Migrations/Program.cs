@@ -1,10 +1,13 @@
 using Builder.Migrations;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 // Usage: Builder.Migrations <up [version] | down <version> | rollback [steps] | status>
-// Connection string: BUILDER_DB env var, or ConnectionStrings__Builder, or the dev default.
+// Connection string: BUILDER_DB, or ConnectionStrings:Builder (env ConnectionStrings__builder, as Aspire
+// injects it), or the dev default.
+var config = new ConfigurationBuilder().AddEnvironmentVariables().AddCommandLine(args.Skip(1).Where(a => a.StartsWith("--")).ToArray()).Build();
 var connectionString = Environment.GetEnvironmentVariable("BUILDER_DB")
-    ?? Environment.GetEnvironmentVariable("ConnectionStrings__Builder")
+    ?? config.GetConnectionString("Builder")
     ?? "Host=localhost;Port=15433;Database=builder;Username=builder;Password=builder";
 
 var command = args.FirstOrDefault() ?? "status";

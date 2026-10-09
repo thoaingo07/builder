@@ -5,6 +5,8 @@ x-builder:
   entry: ci
 
 vars:
+  COMPOSE:
+    sh: command -v podman >/dev/null && echo "podman compose" || echo "docker compose"
   DB: 'Host=localhost;Port=15433;Database=builder;Username=builder;Password=builder'
 
 tasks:
@@ -16,12 +18,12 @@ tasks:
   db:up:
     desc: Start the dev PostgreSQL (localhost:15433)
     cmds:
-      - "docker compose -f deploy/docker-compose.dev.yml up -d"
+      - "{{.COMPOSE}} -f deploy/docker-compose.dev.yml up -d"
 
   db:down:
     desc: Stop the dev PostgreSQL (data is kept in a volume)
     cmds:
-      - "docker compose -f deploy/docker-compose.dev.yml down"
+      - "{{.COMPOSE}} -f deploy/docker-compose.dev.yml down"
 
   migrate:up:
     desc: 'Apply pending migrations (optionally up to a version: task migrate:up -- 3)'
@@ -63,7 +65,23 @@ tasks:
         echo "[Migration($next, \"$title\")] public sealed class M$v : SqlFileMigration;" >> src/Builder.Migrations/Migrations.cs
         echo "created db/migrations/${v}_${title}.{up,down}.sql"
 
-  # ---------- run (each in its own terminal) ----------
+  # ---------- run ----------
+  dev:
+    desc: Run everything under .NET Aspire (PostgreSQL, migrator, API, BFF, 2 agents, Vite UI) with the dashboard
+    cmds:
+      - "dotnet run --project src/Builder.AppHost"
+
+  up:
+    desc: Run the whole stack in containers (Podman or Docker; needs deploy/.env)
+    cmds:
+      - "{{.COMPOSE}} -f deploy/compose.yml up -d --build"
+
+  down:
+    desc: Stop the container stack
+    cmds:
+      - "{{.COMPOSE}} -f deploy/compose.yml down"
+
+  # each in its own terminal, against `task db:up`
   api:
     desc: Run Builder.Api on :19100 (migrates on startup)
     dir: src/Builder.Api
@@ -109,7 +127,7 @@ tasks:
       - "dotnet build Builder.slnx -c Release"
 
   test:
-    desc: Run the .NET tests (needs Docker for the PostgreSQL tests)
+    desc: Run the .NET tests (Aspire starts PostgreSQL, API, BFF and agents; needs Docker or Podman, git and task)
     deps: [build]
     cmds:
       - "dotnet test Builder.slnx -c Release --no-build"

@@ -1,0 +1,22 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.6.1">
+
+  <!-- Local orchestration (dev + tests): PostgreSQL, migrator, API, BFF, agents and the Vite UI.
+       Run: dotnet run (in src/Builder.AppHost), which opens the Aspire dashboard. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsAspireHost>true</IsAspireHost>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.6.1" />
+    <PackageReference Include="Aspire.Hosting.JavaScript" Version="13.6.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Builder.Migrations\Builder.Migrations.csproj" />
+    <ProjectReference Include="..\Builder.Api\Builder.Api.csproj" />
+    <ProjectReference Include="..\Builder.Bff\Builder.Bff.csproj" />
+    <ProjectReference Include="..\Builder.Agent\Builder.Agent.csproj" />
+  </ItemGroup>
+
+</Project>

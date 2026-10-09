@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Builder.Agent/Builder.Agent.csproj" />
     <Project Path="src/Builder.Api/Builder.Api.csproj" />
+    <Project Path="src/Builder.AppHost/Builder.AppHost.csproj" />
     <Project Path="src/Builder.Application/Builder.Application.csproj" />
     <Project Path="src/Builder.Bff/Builder.Bff.csproj" />
     <Project Path="src/Builder.Contracts/Builder.Contracts.csproj" />

@@ -1,0 +1,92 @@
+# The whole Builder stack in containers. Works with Podman and Docker:
+#
+#   cp deploy/.env.example deploy/.env      # then edit the secrets
+#   podman compose -f deploy/compose.yml up -d --build      (or: docker compose ...)
+#   open http://localhost:19000
+#
+# Scale agents:   podman compose -f deploy/compose.yml up -d --scale agent=3
+# Agents can run container builds through the mounted Podman/Docker socket (CONTAINER_SOCKET in .env).
+name: builder
+
+x-agent-env: &agent-env
+  Agent__ServerUrl: http://api:19100
+  Agent__Token: ${BUILDER_AGENT_TOKEN:?set BUILDER_AGENT_TOKEN in deploy/.env}
+  Agent__Capacity: ${BUILDER_AGENT_CAPACITY:-2}
+  Agent__Labels__0: container
+  DOCKER_HOST: unix:///var/run/docker.sock
+
+services:
+  postgres:
+    image: docker.io/library/postgres:17-alpine
+    environment:
+      POSTGRES_USER: builder
+      POSTGRES_PASSWORD: ${BUILDER_DB_PASSWORD:?set BUILDER_DB_PASSWORD in deploy/.env}
+      POSTGRES_DB: builder
+    volumes:
+      - pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U builder -d builder"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/containers/api.Containerfile
+    image: localhost/builder-api:latest
+    environment:
+      ConnectionStrings__Builder: Host=postgres;Port=5432;Database=builder;Username=builder;Password=${BUILDER_DB_PASSWORD}
+      Auth__AdminUser: ${BUILDER_ADMIN_USER:-admin}
+      Auth__AdminPassword: ${BUILDER_ADMIN_PASSWORD:?set BUILDER_ADMIN_PASSWORD in deploy/.env}
+      Auth__Jwt__SigningKey: ${BUILDER_JWT_KEY:?set BUILDER_JWT_KEY (32+ chars) in deploy/.env}
+      Agents__Token: ${BUILDER_AGENT_TOKEN}
+    volumes:
+      - api-data:/data
+    ports:
+      # remote agents on other machines connect here; drop this mapping if all agents run in this compose
+      - "${BUILDER_API_PORT:-19100}:19100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  bff:
+    build:
+      context: ..
+      dockerfile: deploy/containers/bff.Containerfile
+    image: localhost/builder-bff:latest
+    environment:
+      Api__Url: http://api:19100
+      Auth__Jwt__SigningKey: ${BUILDER_JWT_KEY}
+    volumes:
+      - bff-data:/data
+    ports:
+      - "${BUILDER_UI_PORT:-19000}:19000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  agent:
+    build:
+      context: ..
+      dockerfile: deploy/containers/agent.Containerfile
+      args:
+        INSTALL_AZ: ${BUILDER_AGENT_INSTALL_AZ:-false}
+    image: localhost/builder-agent:latest
+    environment: *agent-env
+    volumes:
+      - agent-work:/work
+      - ${CONTAINER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+    security_opt:
+      - label=disable   # SELinux hosts (Fedora/RHEL): allow access to the mounted socket
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pg:
+  api-data:
+  bff-data:
+  agent-work:
