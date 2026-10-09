@@ -19,7 +19,8 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
             log.System($"Agent {options.EffectiveName} running '{job.TaskName}' of {job.PipelineName} #{job.BuildNumber}");
 
             await workspace.CheckoutAsync(job.Source, log, ct);
-            var taskDir = workspace.TaskDirectory(job.TaskfilePath);
+            // runners run from the repository root (go-task --dir), so artifact globs are repository-relative too
+            var taskDir = workspace.Source;
 
             foreach (var artifact in job.DownloadArtifacts)
             {
@@ -36,12 +37,12 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
             }
 
             derivedTaskfile = workspace.PrepareTaskfile(job.TaskfilePath, job.TaskName, job.JobId);
-            List<string> args = ["--taskfile", derivedTaskfile, "--yes", "--color=false", job.TaskName];
+            List<string> args = ["--dir", workspace.Source, "--taskfile", derivedTaskfile, "--yes", "--color=false", job.TaskName];
             args.AddRange(job.TaskVars.Select(kv => $"{kv.Key}={kv.Value}"));
             env["NO_COLOR"] = "1";
 
             // go-task echoes each command as "task: [name] cmd" on stderr; show those as step markers, not errors
-            var exit = await ProcessRunner.RunAsync(options.TaskBinary, args, Path.GetDirectoryName(derivedTaskfile)!, env,
+            var exit = await ProcessRunner.RunAsync(options.TaskBinary, args, workspace.Source, env,
                 (stream, line) => log.Write(line.StartsWith("task: ", StringComparison.Ordinal) ? LogStream.System : stream, line), ct);
             if (exit != 0) return Fail(log, job, exit, $"task '{job.TaskName}' exited with code {exit}");
 

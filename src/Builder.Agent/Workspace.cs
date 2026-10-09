@@ -84,9 +84,6 @@ public sealed class Workspace
         return derived;
     }
 
-    /// <summary>The directory go-task runs commands in: the Taskfile's own directory.</summary>
-    public string TaskDirectory(string taskfilePath) => Path.GetDirectoryName(Path.GetFullPath(Path.Combine(Source, taskfilePath)))!;
-
     /// <summary>Packs files matching the globs (relative to <paramref name="baseDir"/>) into one tar.gz.</summary>
     public async Task<(string Path, int Files)> PackAsync(IEnumerable<string> globs, string name, string baseDir, CancellationToken ct)
     {

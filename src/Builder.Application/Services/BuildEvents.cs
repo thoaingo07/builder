@@ -10,10 +10,10 @@ public sealed class BuildEvents(IAppDbContext db, IUiNotifier ui)
 {
     public async Task PublishAsync(Build build, IEnumerable<BuildJob> changedJobs, CancellationToken ct = default)
     {
-        var pipelineName = await db.Pipelines.AsNoTracking()
+        var pipelineName = await db.Pipelines.AsNoTracking().IgnoreQueryFilters()
             .Where(p => p.Id == build.PipelineId).Select(p => p.Name).FirstOrDefaultAsync(ct) ?? "?";
         foreach (var job in changedJobs.DistinctBy(j => j.Id))
             await ui.JobUpdated(job.ToDto());
-        await ui.BuildUpdated(build.ToSummary(pipelineName));
+        await ui.BuildUpdated(build.OrgId, build.ToSummary(pipelineName));
     }
 }

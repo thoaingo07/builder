@@ -2,19 +2,26 @@ using System.Text;
 using Builder.Application.Abstractions;
 using Builder.Domain.Connections;
 using Builder.Domain.Pipelines;
+using Builder.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 
 namespace Builder.Application.Services;
 
-/// <summary>Builds the authenticated <see cref="GitRemote"/> for a pipeline from its connection.</summary>
+/// <summary>Builds the authenticated <see cref="GitRemote"/> for a repository from its connection.</summary>
 public sealed class GitRemotes(IAppDbContext db, ISecretProtector secrets)
 {
-    public async Task<GitRemote> ForPipelineAsync(Pipeline pipeline, CancellationToken ct)
+    public async Task<GitRemote> ForRepositoryAsync(Repository repository, CancellationToken ct)
     {
-        GitConnection? connection = pipeline.ConnectionId is { } id
-            ? await db.Connections.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct)
+        GitConnection? connection = repository.ConnectionId is { } id
+            ? await db.Connections.AsNoTracking().IgnoreQueryFilters().FirstOrDefaultAsync(c => c.Id == id && c.OrgId == repository.OrgId, ct)
             : null;
-        return new GitRemote(pipeline.RepositoryUrl, AuthorizationHeader(connection));
+        return new GitRemote(repository.Url, AuthorizationHeader(connection));
+    }
+
+    public async Task<(GitRemote Remote, Repository Repository)> ForPipelineAsync(Pipeline pipeline, CancellationToken ct)
+    {
+        var repository = await db.Repositories.AsNoTracking().IgnoreQueryFilters().FirstAsync(r => r.Id == pipeline.RepositoryId, ct);
+        return (await ForRepositoryAsync(repository, ct), repository);
     }
 
     public string? AuthorizationHeader(GitConnection? connection)

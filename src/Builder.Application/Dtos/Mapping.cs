@@ -38,7 +38,7 @@ public static class Mapping
     public static LogLineDto ToDto(this LogLine l) => new(l.Id, l.JobId, l.Timestamp, l.Stream, l.Text);
 
     public static AgentDto ToDto(this Agent a, AgentMetricsDto? metrics, List<AgentRunningJobDto> running) => new(
-        a.Id, a.Name, a.HostName, a.Os, a.Version, a.Capacity, a.Labels, a.Enabled, a.Online, a.LastSeenAt, metrics, running);
+        a.Id, a.OrgId is null, a.Name, a.HostName, a.Os, a.Version, a.Capacity, a.Labels, a.Enabled, a.Online, a.LastSeenAt, metrics, running);
 
     public static EnvironmentDto ToDto(this DeployEnvironment e) => new(
         e.Id, e.Name, e.Type, e.RequiresApproval, e.Approvers, e.AgentLabels, e.Host, e.Port, e.Username,

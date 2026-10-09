@@ -32,7 +32,7 @@ public sealed class DatabaseMigrator : IDisposable
             .AddLogging(l =>
             {
                 l.ClearProviders();
-                if (logger is not null) l.AddProvider(logger);
+                if (logger is not null) l.AddProvider(new NoSqlLoggerProvider(logger));
             })
             .Configure<FluentMigratorLoggerOptions>(o =>
             {
@@ -87,5 +87,35 @@ public sealed class DatabaseMigrator : IDisposable
     {
         _scope.Dispose();
         _services.Dispose();
+    }
+}
+
+/// <summary>
+/// Drops FluentMigrator's statement-level entries (the SQL text): a migration may carry seeded secrets.
+/// Version, title and timing lines still get through.
+/// </summary>
+internal sealed class NoSqlLoggerProvider(ILoggerProvider inner) : ILoggerProvider
+{
+    public ILogger CreateLogger(string categoryName) => new NoSqlLogger(inner.CreateLogger(categoryName));
+    public void Dispose() => inner.Dispose();
+
+    private sealed class NoSqlLogger(ILogger inner) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => inner.BeginScope(state);
+        public bool IsEnabled(LogLevel logLevel) => inner.IsEnabled(logLevel);
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            var message = formatter(state, exception);
+            if (logLevel < LogLevel.Warning && (message.StartsWith("ExecuteSqlStatement", StringComparison.Ordinal)
+                                                || message.Contains("CREATE ", StringComparison.Ordinal)
+                                                || message.Contains("ALTER ", StringComparison.Ordinal)
+                                                || message.Contains("INSERT ", StringComparison.Ordinal)
+                                                || message.Contains("UPDATE ", StringComparison.Ordinal)
+                                                || message.Contains("DELETE ", StringComparison.Ordinal)
+                                                || message.Contains("DROP ", StringComparison.Ordinal)))
+                return;
+            inner.Log(logLevel, eventId, state, exception, formatter);
+        }
     }
 }

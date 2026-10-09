@@ -4,7 +4,9 @@ using Builder.Domain.Agents;
 using Builder.Domain.Builds;
 using Builder.Domain.Connections;
 using Builder.Domain.Deployments;
+using Builder.Domain.Organizations;
 using Builder.Domain.Pipelines;
+using Builder.Domain.Repositories;
 using Builder.Domain.Users;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -16,8 +18,14 @@ namespace Builder.Infrastructure.Persistence;
 /// EF Core is the data-access layer only. The schema is owned by the raw SQL migrations in
 /// <c>db/migrations</c> (FluentMigrator); keep this mapping in step with them (snake_case names).
 /// </summary>
-public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options), IAppDbContext
+public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ICurrentOrg? currentOrg = null) : DbContext(options), IAppDbContext
 {
+    /// <summary>
+    /// Organization the global query filters scope to. Null (no request, e.g. scheduler/agents) disables them;
+    /// read per query, so EF parameterizes it.
+    /// </summary>
+    private Guid? OrgFilter => currentOrg?.OrgId;
+
     public DbSet<Pipeline> Pipelines => Set<Pipeline>();
     public DbSet<Build> Builds => Set<Build>();
     public DbSet<BuildJob> BuildJobs => Set<BuildJob>();
@@ -28,6 +36,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Deployment> Deployments => Set<Deployment>();
     public DbSet<GitConnection> Connections => Set<GitConnection>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<Organization> Organizations => Set<Organization>();
+    public DbSet<Membership> Memberships => Set<Membership>();
+    public DbSet<Repository> Repositories => Set<Repository>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder b)
     {
@@ -74,8 +85,34 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
         m.Entity<User>(e => e.ToTable("users"));
 
+        m.Entity<Organization>(e => e.ToTable("organizations"));
+        m.Entity<Membership>(e =>
+        {
+            e.ToTable("memberships");
+            e.HasKey(x => new { x.OrgId, x.UserId });
+        });
+        m.Entity<Repository>(e => e.ToTable("repositories"));
+
+        // organization isolation: every org-scoped table is filtered to the current organization
+        m.Entity<Pipeline>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
+        m.Entity<Build>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
+        m.Entity<GitConnection>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
+        m.Entity<DeployEnvironment>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
+        m.Entity<Deployment>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
+        m.Entity<Repository>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
+        m.Entity<Agent>().HasQueryFilter(x => OrgFilter == null || x.OrgId == null || x.OrgId == OrgFilter);
+
         // relationships without navigations, mirroring the FKs in db/migrations (also orders inserts)
-        m.Entity<Pipeline>().HasOne<GitConnection>().WithMany().HasForeignKey(p => p.ConnectionId).OnDelete(DeleteBehavior.Restrict);
+        m.Entity<Repository>().HasOne<GitConnection>().WithMany().HasForeignKey(r => r.ConnectionId).OnDelete(DeleteBehavior.Restrict);
+        m.Entity<Pipeline>().HasOne<Repository>().WithMany().HasForeignKey(p => p.RepositoryId).OnDelete(DeleteBehavior.Cascade);
+        m.Entity<Repository>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
+        m.Entity<Pipeline>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
+        m.Entity<Build>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
+        m.Entity<GitConnection>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
+        m.Entity<DeployEnvironment>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
+        m.Entity<Agent>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
+        m.Entity<Membership>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
+        m.Entity<Membership>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         m.Entity<Build>().HasOne<Pipeline>().WithMany().HasForeignKey(b => b.PipelineId).OnDelete(DeleteBehavior.Restrict);
         m.Entity<LogLine>().HasOne<Build>().WithMany().HasForeignKey(l => l.BuildId).OnDelete(DeleteBehavior.Cascade);
         m.Entity<LogLine>().HasOne<BuildJob>().WithMany().HasForeignKey(l => l.JobId).OnDelete(DeleteBehavior.Cascade);

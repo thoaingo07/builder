@@ -7,16 +7,17 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Builder.Application.Services;
 
-public sealed class EnvironmentService(IAppDbContext db, IClock clock, ISecretProtector secrets)
+public sealed class EnvironmentService(IAppDbContext db, IClock clock, ICurrentOrg current, ISecretProtector secrets)
 {
     public async Task<List<EnvironmentDto>> ListAsync(CancellationToken ct) =>
         (await db.Environments.AsNoTracking().OrderBy(e => e.Name).ToListAsync(ct)).Select(e => e.ToDto()).ToList();
 
     public async Task<EnvironmentDto> CreateAsync(EnvironmentInput input, CancellationToken ct)
     {
+        current.RequireRole(Domain.Organizations.OrgRole.Admin);
         if (await db.Environments.AnyAsync(e => e.Name == input.Name.Trim(), ct))
             throw new DomainException($"An environment named '{input.Name}' already exists.");
-        var env = new DeployEnvironment(input.Name, input.Type, clock.UtcNow);
+        var env = new DeployEnvironment(current.RequireOrgId(), input.Name, input.Type, clock.UtcNow);
         Apply(env, input);
         db.Environments.Add(env);
         await db.SaveChangesAsync(ct);
@@ -25,6 +26,7 @@ public sealed class EnvironmentService(IAppDbContext db, IClock clock, ISecretPr
 
     public async Task<EnvironmentDto> UpdateAsync(Guid id, EnvironmentInput input, CancellationToken ct)
     {
+        current.RequireRole(Domain.Organizations.OrgRole.Admin);
         var env = await db.Environments.FirstOrDefaultAsync(e => e.Id == id, ct) ?? throw new NotFoundException("Environment");
         env.Rename(input.Name);
         Apply(env, input);
@@ -34,6 +36,7 @@ public sealed class EnvironmentService(IAppDbContext db, IClock clock, ISecretPr
 
     public async Task DeleteAsync(Guid id, CancellationToken ct)
     {
+        current.RequireRole(Domain.Organizations.OrgRole.Admin);
         var env = await db.Environments.FirstOrDefaultAsync(e => e.Id == id, ct) ?? throw new NotFoundException("Environment");
         if (await db.Deployments.AnyAsync(d => d.EnvironmentId == id && d.Status == DeploymentStatus.Active, ct))
             throw new DomainException("Destroy the active deployments of this environment first.");
@@ -80,7 +83,7 @@ public sealed class DeploymentService(
 
         var required = new List<string>(env.AgentLabels) { env.Type == EnvironmentType.Kubernetes ? "kubectl" : "ssh" };
         var agent = (await db.Agents.AsNoTracking().Where(a => a.Online && a.Enabled).ToListAsync(ct))
-            .FirstOrDefault(a => gateway.IsConnected(a.Id) && a.Matches(required))
+            .FirstOrDefault(a => gateway.IsConnected(a.Id) && a.Serves(d.OrgId) && a.Matches(required))
             ?? throw new DomainException($"No online agent with labels [{string.Join(", ", required)}] can tear this deployment down.");
 
         d.Destroying(clock.UtcNow);
@@ -92,7 +95,7 @@ public sealed class DeploymentService(
 
         var name = await db.Pipelines.Where(p => p.Id == d.PipelineId).Select(p => p.Name).FirstOrDefaultAsync(ct) ?? "?";
         var dto = d.ToDto(name);
-        await ui.DeploymentUpdated(dto);
+        await ui.DeploymentUpdated(d.OrgId, dto);
         return dto;
     }
 }

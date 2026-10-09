@@ -6,26 +6,53 @@ using Builder.Application.Services;
 using Builder.Contracts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 
 namespace Builder.Api.Hubs;
 
-/// <summary>Live updates for the web UI (reached through the BFF).</summary>
+/// <summary>
+/// Live updates for the web UI (reached through the BFF). A client joins its current organization
+/// (JoinOrg) and the builds it shows (JoinBuild); both check membership.
+/// </summary>
 [Authorize(Policy = AuthSchemes.UserPolicy)]
-public sealed class UiHub : Hub
+public sealed class UiHub(OrganizationService orgs, IAppDbContext db) : Hub
 {
+    public static string OrgGroup(Guid orgId) => $"org:{orgId}";
     public static string BuildGroup(Guid buildId) => $"build:{buildId}";
 
-    public Task JoinBuild(Guid buildId) => Groups.AddToGroupAsync(Context.ConnectionId, BuildGroup(buildId));
+    public async Task JoinOrg(Guid orgId)
+    {
+        await RequireMemberAsync(orgId);
+        if (Context.Items.TryGetValue("org", out var previous) && previous is Guid old && old != orgId)
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, OrgGroup(old));
+        Context.Items["org"] = orgId;
+        await Groups.AddToGroupAsync(Context.ConnectionId, OrgGroup(orgId));
+    }
+
+    public async Task JoinBuild(Guid buildId)
+    {
+        var orgId = await db.Builds.IgnoreQueryFilters().Where(b => b.Id == buildId).Select(b => (Guid?)b.OrgId).FirstOrDefaultAsync()
+            ?? throw new HubException("Build not found.");
+        await RequireMemberAsync(orgId);
+        await Groups.AddToGroupAsync(Context.ConnectionId, BuildGroup(buildId));
+    }
+
     public Task LeaveBuild(Guid buildId) => Groups.RemoveFromGroupAsync(Context.ConnectionId, BuildGroup(buildId));
+
+    private async Task RequireMemberAsync(Guid orgId)
+    {
+        var (_, role) = await orgs.MembershipAsync(Context.User?.Identity?.Name ?? "", orgId, Context.ConnectionAborted);
+        if (role is null) throw new HubException("Not a member of this organization.");
+    }
 }
 
 public sealed class SignalRUiNotifier(IHubContext<UiHub> hub) : IUiNotifier
 {
-    public Task BuildUpdated(BuildSummaryDto build) => hub.Clients.All.SendAsync("BuildUpdated", build);
+    public Task BuildUpdated(Guid orgId, BuildSummaryDto build) => hub.Clients.Group(UiHub.OrgGroup(orgId)).SendAsync("BuildUpdated", build);
     public Task JobUpdated(JobDto job) => hub.Clients.Group(UiHub.BuildGroup(job.BuildId)).SendAsync("JobUpdated", job);
     public Task Log(Guid buildId, IReadOnlyList<LogLineDto> lines) => hub.Clients.Group(UiHub.BuildGroup(buildId)).SendAsync("Log", buildId, lines);
-    public Task AgentsUpdated(IReadOnlyList<AgentDto> agents) => hub.Clients.All.SendAsync("AgentsUpdated", agents);
-    public Task DeploymentUpdated(DeploymentDto deployment) => hub.Clients.All.SendAsync("DeploymentUpdated", deployment);
+    public Task AgentsUpdated(Guid orgId, IReadOnlyList<AgentDto> agents) => hub.Clients.Group(UiHub.OrgGroup(orgId)).SendAsync("AgentsUpdated", agents);
+    public Task DeploymentUpdated(Guid orgId, DeploymentDto deployment) => hub.Clients.Group(UiHub.OrgGroup(orgId)).SendAsync("DeploymentUpdated", deployment);
 }
 
 /// <summary>Which SignalR connection belongs to which agent.</summary>
@@ -46,7 +73,8 @@ public sealed class AgentHub(AgentService agents, AgentConnections connections) 
 
     public async Task<AgentWelcome> Register(AgentHello hello)
     {
-        var welcome = await agents.RegisterAsync(Context.ConnectionId, hello, Context.ConnectionAborted);
+        var orgId = Guid.TryParse(Context.User?.FindFirst("org")?.Value, out var o) ? o : (Guid?)null;
+        var welcome = await agents.RegisterAsync(Context.ConnectionId, orgId, hello, Context.ConnectionAborted);
         Context.Items["agentId"] = welcome.AgentId;
         connections.Set(welcome.AgentId, Context.ConnectionId);
         return welcome;

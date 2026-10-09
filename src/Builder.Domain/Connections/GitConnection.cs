@@ -1,11 +1,14 @@
+using Builder.Domain.Organizations;
+
 namespace Builder.Domain.Connections;
 
 public enum ConnectionType { AzureDevOps, Git }
 
 /// <summary>Credentials for a git host. <see cref="TokenProtected"/> holds ciphertext.</summary>
-public sealed class GitConnection
+public sealed class GitConnection : IOrgScoped
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7();
+    public Guid OrgId { get; private set; }
     public string Name { get; private set; } = "";
     public ConnectionType Type { get; private set; }
     /// <summary>Azure DevOps organization URL (https://dev.azure.com/org) or a git host base URL.</summary>
@@ -16,8 +19,9 @@ public sealed class GitConnection
 
     private GitConnection() { }
 
-    public GitConnection(string name, ConnectionType type, string url, DateTimeOffset now)
+    public GitConnection(Guid orgId, string name, ConnectionType type, string url, DateTimeOffset now)
     {
+        OrgId = orgId;
         CreatedAt = now;
         Update(name, type, url, null, null);
     }

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using Builder.Application;
 using Builder.Application.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -27,13 +28,39 @@ public sealed partial class GitCli(IOptions<BuilderStorageOptions> options) : IG
     {
         if (ShaRegex().IsMatch(branch)) return branch.ToLowerInvariant();
         var r = await RunAsync(null, remote, ct, "ls-remote", remote.Url, $"refs/heads/{branch}", $"refs/tags/{branch}");
-        if (r.ExitCode != 0) throw new InvalidOperationException($"Cannot reach repository: {r.Error}");
+        if (r.ExitCode != 0) throw new ExternalServiceException($"Cannot reach repository: {r.Error}");
         var line = r.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()
-            ?? throw new InvalidOperationException($"Branch '{branch}' does not exist in {remote.Url}.");
+            ?? throw new ExternalServiceException($"Branch '{branch}' does not exist in {remote.Url}.");
         return line.Split('\t')[0].Trim();
     }
 
-    public async Task<string?> ReadFileAsync(GitRemote remote, string branch, string commit, string path, CancellationToken ct)
+    public Task<string?> ReadFileAsync(GitRemote remote, string branch, string commit, string path, CancellationToken ct) =>
+        WithCommitAsync(remote, branch, commit, ct, async dir =>
+        {
+            var show = await RunAsync(dir, null, ct, "show", $"{commit}:{path.TrimStart('/')}");
+            if (show.ExitCode == 0) return show.Output;
+            if (show.Error.Contains("does not exist") || show.Error.Contains("exists on disk, but not in")) return (string?)null;
+            throw new ExternalServiceException($"git show failed: {show.Error}");
+        });
+
+    public Task<IReadOnlyList<string>> ListFilesAsync(GitRemote remote, string branch, string commit, string folder, CancellationToken ct) =>
+        WithCommitAsync(remote, branch, commit, ct, async dir =>
+        {
+            var tree = await RunAsync(dir, null, ct, "ls-tree", "--name-only", commit, folder.Trim('/') + "/");
+            if (tree.ExitCode != 0) throw new ExternalServiceException($"git ls-tree failed: {tree.Error}");
+            return (IReadOnlyList<string>)tree.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList();
+        });
+
+    public async Task<IReadOnlyList<string>> ListBranchesAsync(GitRemote remote, CancellationToken ct)
+    {
+        var r = await RunAsync(null, remote, ct, "ls-remote", "--heads", remote.Url);
+        if (r.ExitCode != 0) throw new ExternalServiceException($"Cannot reach repository: {r.Error.Trim()}");
+        return r.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Split('\t')[1].Replace("refs/heads/", "")).ToList();
+    }
+
+    /// <summary>Makes sure the commit is in the bare cache (shallow fetch by SHA, else the branch) and runs <paramref name="action"/>.</summary>
+    private async Task<T> WithCommitAsync<T>(GitRemote remote, string branch, string commit, CancellationToken ct, Func<string, Task<T>> action)
     {
         var dir = Path.Combine(_cacheRoot, Hash(remote.Url));
         var gate = RepoLocks.GetOrAdd(dir, _ => new SemaphoreSlim(1, 1));
@@ -51,10 +78,7 @@ public sealed partial class GitCli(IOptions<BuilderStorageOptions> options) : IG
                 if (byCommit.ExitCode != 0)
                     await RunCheckedAsync(dir, remote, ct, "fetch", "--quiet", remote.Url, $"+refs/heads/{branch}:refs/heads/{branch}");
             }
-            var show = await RunAsync(dir, null, ct, "show", $"{commit}:{path.TrimStart('/')}");
-            if (show.ExitCode == 0) return show.Output;
-            if (show.Error.Contains("does not exist") || show.Error.Contains("exists on disk, but not in")) return null;
-            throw new InvalidOperationException($"git show failed: {show.Error}");
+            return await action(dir);
         }
         finally
         {
@@ -70,7 +94,7 @@ public sealed partial class GitCli(IOptions<BuilderStorageOptions> options) : IG
         {
             await RunCheckedAsync(null, remote, ct, "clone", "--quiet", "--depth", "1", "--branch", branch, "--single-branch", remote.Url, dir);
             var file = Path.GetFullPath(Path.Combine(dir, path));
-            if (!file.StartsWith(dir + Path.DirectorySeparatorChar)) throw new InvalidOperationException("Invalid Taskfile path.");
+            if (!file.StartsWith(dir + Path.DirectorySeparatorChar)) throw new ExternalServiceException("Invalid Taskfile path.");
             Directory.CreateDirectory(Path.GetDirectoryName(file)!);
             await File.WriteAllTextAsync(file, content.ReplaceLineEndings("\n"), new UTF8Encoding(false), ct);
             await RunCheckedAsync(dir, null, ct, "add", "--", path);
@@ -91,7 +115,7 @@ public sealed partial class GitCli(IOptions<BuilderStorageOptions> options) : IG
     private static async Task<string> RunCheckedAsync(string? cwd, GitRemote? auth, CancellationToken ct, params string[] args)
     {
         var r = await RunAsync(cwd, auth, ct, args);
-        if (r.ExitCode != 0) throw new InvalidOperationException($"git {args.FirstOrDefault(a => !a.StartsWith('-'))} failed: {r.Error.Trim()}");
+        if (r.ExitCode != 0) throw new ExternalServiceException($"git {args.FirstOrDefault(a => !a.StartsWith('-'))} failed: {r.Error.Trim()}");
         return r.Output;
     }
 

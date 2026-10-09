@@ -1,11 +1,14 @@
+using Builder.Domain.Organizations;
+
 namespace Builder.Domain.Deployments;
 
 public enum EnvironmentType { SshDocker, Kubernetes }
 
 /// <summary>A deploy target. Secret fields hold ciphertext produced by the application's secret protector.</summary>
-public sealed class DeployEnvironment
+public sealed class DeployEnvironment : IOrgScoped
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7();
+    public Guid OrgId { get; private set; }
     public string Name { get; private set; } = "";
     public EnvironmentType Type { get; private set; }
     public bool RequiresApproval { get; private set; }
@@ -32,8 +35,9 @@ public sealed class DeployEnvironment
 
     private DeployEnvironment() { }
 
-    public DeployEnvironment(string name, EnvironmentType type, DateTimeOffset now)
+    public DeployEnvironment(Guid orgId, string name, EnvironmentType type, DateTimeOffset now)
     {
+        OrgId = orgId;
         Rename(name);
         Type = type;
         CreatedAt = now;
@@ -78,9 +82,10 @@ public sealed class DeployEnvironment
 
 public enum DeploymentStatus { Deploying, Active, Failed, Destroying, Destroyed }
 
-public sealed class Deployment
+public sealed class Deployment : IOrgScoped
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7();
+    public Guid OrgId { get; private set; }
     public Guid EnvironmentId { get; private set; }
     public string EnvironmentName { get; private set; } = "";
     public Guid PipelineId { get; private set; }
@@ -101,6 +106,7 @@ public sealed class Deployment
     public Deployment(DeployEnvironment env, Guid pipelineId, Guid buildId, int buildNumber, Guid jobId,
         string name, string? compose, string? manifests, string? url, DateTimeOffset now)
     {
+        OrgId = env.OrgId;
         EnvironmentId = env.Id;
         EnvironmentName = env.Name;
         PipelineId = pipelineId;

@@ -1,10 +1,13 @@
+using Builder.Domain.Organizations;
+
 namespace Builder.Domain.Builds;
 
 public enum BuildStatus { Planning, Running, Canceling, Succeeded, Failed, Canceled }
 
-public sealed class Build
+public sealed class Build : IOrgScoped
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7();
+    public Guid OrgId { get; private set; }
     public Guid PipelineId { get; private set; }
     public int Number { get; private set; }
     public string Branch { get; private set; } = "";
@@ -22,9 +25,10 @@ public sealed class Build
 
     private Build() { }
 
-    public static Build Queue(Guid pipelineId, int number, string branch, string? entryTask,
+    public static Build Queue(Guid orgId, Guid pipelineId, int number, string branch, string? entryTask,
         Dictionary<string, string>? variables, string requestedBy, DateTimeOffset now, string? commit = null) => new()
     {
+        OrgId = orgId,
         PipelineId = pipelineId,
         Commit = commit,
         Number = number,

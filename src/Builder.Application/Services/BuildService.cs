@@ -18,12 +18,13 @@ public sealed class BuildService(
         string? commit = null)
     {
         var pipeline = await db.Pipelines.FirstOrDefaultAsync(p => p.Id == pipelineId, ct)
-            ?? throw new NotFoundException("Pipeline");
+            ?? throw new NotFoundException("Runner");
+        var defaultBranch = await db.Repositories.Where(r => r.Id == pipeline.RepositoryId).Select(r => r.DefaultBranch).FirstAsync(ct);
         var vars = (input.Variables ?? new())
             .Where(kv => !string.IsNullOrWhiteSpace(kv.Key))
             .ToDictionary(kv => kv.Key.Trim(), kv => kv.Value ?? "");
-        var build = Build.Queue(pipeline.Id, pipeline.NextBuildNumber(),
-            string.IsNullOrWhiteSpace(input.Branch) ? pipeline.DefaultBranch : input.Branch.Trim(),
+        var build = Build.Queue(pipeline.OrgId, pipeline.Id, pipeline.NextBuildNumber(),
+            string.IsNullOrWhiteSpace(input.Branch) ? defaultBranch : input.Branch.Trim(),
             string.IsNullOrWhiteSpace(input.EntryTask) ? null : input.EntryTask.Trim(),
             vars, user, clock.UtcNow, commit);
         db.Builds.Add(build);
@@ -116,6 +117,7 @@ public sealed class BuildService(
     }
 
     public async Task<List<LogLineDto>> LogsAsync(Guid buildId, Guid jobId, long after, CancellationToken ct) =>
+        !await db.Builds.AnyAsync(b => b.Id == buildId, ct) ? throw new NotFoundException("Build") : // org check
         (await db.LogLines.AsNoTracking()
             .Where(l => l.BuildId == buildId && l.JobId == jobId && l.Id > after)
             .OrderBy(l => l.Id).Take(5000).ToListAsync(ct))
@@ -125,6 +127,7 @@ public sealed class BuildService(
     {
         var artifact = await db.Artifacts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == artifactId, ct)
             ?? throw new NotFoundException("Artifact");
+        if (!await db.Builds.AnyAsync(b => b.Id == artifact.BuildId, ct)) throw new NotFoundException("Artifact"); // org check
         return (artifactStore.OpenRead(artifact.StoragePath), artifact.Name + ".tar.gz");
     }
 

@@ -71,11 +71,15 @@ public sealed class DatabaseTests(AspireFixture aspire) : IAsyncLifetime
         }
 
         // and a full aggregate round-trips
-        var connection = new GitConnection("azdo", ConnectionType.AzureDevOps, "https://dev.azure.com/org", Now);
-        var pipeline = new Pipeline("shop", connection.Id, "https://dev.azure.com/org/p/_git/shop", "main", "Taskfile.yml", "ci", Now);
-        var build = Build.Queue(pipeline.Id, pipeline.NextBuildNumber(), "main", null, new() { ["X"] = "1" }, "admin", Now);
-        db.AddRange(connection, pipeline, build, new Agent("agent-1", Now), new User("admin", "Admin", "hash", true, Now),
-            new DeployEnvironment("prod", EnvironmentType.SshDocker, Now));
+        var org = new Builder.Domain.Organizations.Organization("Acme", "admin", Now);
+        var connection = new GitConnection(org.Id, "azdo", ConnectionType.AzureDevOps, "https://dev.azure.com/org", Now);
+        var repository = new Builder.Domain.Repositories.Repository(org.Id, connection.Id, null, "https://dev.azure.com/org/p/_git/shop", "main", Now);
+        var pipeline = new Pipeline(repository, "ci", ".builder/runners/ci.yml", "ci", Now);
+        var build = Build.Queue(org.Id, pipeline.Id, pipeline.NextBuildNumber(), "main", null, new() { ["X"] = "1" }, "admin", Now);
+        var user = new User("admin", "Admin", "hash", true, Now);
+        db.AddRange(org, connection, repository, pipeline, build, new Agent(null, "agent-1", Now), new Agent(org.Id, "agent-1", Now), user,
+            new DeployEnvironment(org.Id, "prod", EnvironmentType.SshDocker, Now),
+            new Builder.Domain.Organizations.Membership(org.Id, user.Id, Builder.Domain.Organizations.OrgRole.Owner, Now));
         await db.SaveChangesAsync();
 
         build.Planned("abc123", "ci", [

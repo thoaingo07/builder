@@ -7,10 +7,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Builder.Application.Services;
 
-public sealed class CleanupService(IAppDbContext db, IClock clock, BuildService builds, AgentService agents)
+public sealed class CleanupService(IAppDbContext db, IClock clock, ICurrentOrg current, BuildService builds, AgentService agents)
 {
+    /// <summary>Deletes the current organization's old builds; workspace/docker cleanup goes to its own agents only.</summary>
     public async Task<CleanupResultDto> RunAsync(CleanupInput input, CancellationToken ct)
     {
+        current.RequireRole(Domain.Organizations.OrgRole.Admin);
         var cutoff = clock.UtcNow.AddDays(-Math.Max(0, input.OlderThanDays));
         var keep = Math.Max(0, input.KeepLastPerPipeline);
 
@@ -30,8 +32,8 @@ public sealed class CleanupService(IAppDbContext db, IClock clock, BuildService 
 
         var notified = 0;
         if (input.RemoveWorkspaces || input.DockerPrune)
-            foreach (var agent in (await agents.ListAsync(ct)).Where(a => a.Online))
-                if (await agents.RequestCleanupAsync(agent.Id, new AgentCleanupInput(input.RemoveWorkspaces, input.DockerPrune), ct))
+            foreach (var agent in (await agents.ListAsync(ct)).Where(a => a.Online && !a.Shared))
+                if (await agents.CleanupAgentAsync(agent.Id, new AgentCleanupInput(input.RemoveWorkspaces, input.DockerPrune), ct))
                     notified++;
 
         return new CleanupResultDto(doomed.Count, artifacts, bytes, notified);

@@ -15,6 +15,7 @@ public sealed class AgentService(
     IClock clock,
     IBuildLock buildLock,
     IAgentGateway gateway,
+    ICurrentOrg current,
     IAgentMetricsStore metrics,
     IArtifactStore artifactStore,
     IUiNotifier ui,
@@ -25,7 +26,8 @@ public sealed class AgentService(
     /// <summary>How long an agent may be disconnected before its jobs are failed.</summary>
     public static readonly TimeSpan LostAfter = TimeSpan.FromSeconds(60);
 
-    public async Task<AgentWelcome> RegisterAsync(string connectionId, AgentHello hello, CancellationToken ct)
+    /// <param name="orgId">The organization of the agent's token; null for the shared (system) token.</param>
+    public async Task<AgentWelcome> RegisterAsync(string connectionId, Guid? orgId, AgentHello hello, CancellationToken ct)
     {
         var name = hello.Name.Trim();
         if (name.Length == 0) throw new DomainException("Agent name is required.");
@@ -41,7 +43,7 @@ public sealed class AgentService(
         Agent agent;
         using (await buildLock.AcquireAsync(ct))
         {
-            agent = await db.Agents.FirstOrDefaultAsync(a => a.Name == name, ct) ?? AddAgent(name);
+            agent = await db.Agents.IgnoreQueryFilters().FirstOrDefaultAsync(a => a.Name == name && a.OrgId == orgId, ct) ?? AddAgent(name);
             agent.Connected(connectionId, hello.HostName, hello.Os, hello.Version, hello.Capacity, labels, clock.UtcNow);
 
             // jobs the server thinks run on this agent but the agent no longer knows about
@@ -67,7 +69,7 @@ public sealed class AgentService(
 
         Agent AddAgent(string n)
         {
-            var a = new Agent(n, clock.UtcNow);
+            var a = new Agent(orgId, n, clock.UtcNow);
             db.Agents.Add(a);
             return a;
         }
@@ -158,7 +160,7 @@ public sealed class AgentService(
         if (deployment is not null)
         {
             var name = await db.Pipelines.Where(p => p.Id == deployment.PipelineId).Select(p => p.Name).FirstAsync(ct);
-            await ui.DeploymentUpdated(deployment.ToDto(name));
+            await ui.DeploymentUpdated(deployment.OrgId, deployment.ToDto(name));
         }
     }
 
@@ -185,29 +187,40 @@ public sealed class AgentService(
         d.Destroyed(result.Succeeded, result.Output, clock.UtcNow);
         await db.SaveChangesAsync(ct);
         var name = await db.Pipelines.Where(p => p.Id == d.PipelineId).Select(p => p.Name).FirstOrDefaultAsync(ct) ?? "?";
-        await ui.DeploymentUpdated(d.ToDto(name));
+        await ui.DeploymentUpdated(d.OrgId, d.ToDto(name));
     }
 
     // ---- UI ----
 
-    public async Task<List<AgentDto>> ListAsync(CancellationToken ct)
+    /// <summary>The current organization's agents plus the shared pool.</summary>
+    public Task<List<AgentDto>> ListAsync(CancellationToken ct) => ListForOrgAsync(current.RequireOrgId(), ct);
+
+    /// <summary>Agents an organization can use, with only that organization's running jobs (shared agents may run others').</summary>
+    public async Task<List<AgentDto>> ListForOrgAsync(Guid orgId, CancellationToken ct)
     {
-        var agents = await db.Agents.AsNoTracking().OrderBy(a => a.Name).ToListAsync(ct);
+        var agents = await db.Agents.AsNoTracking().IgnoreQueryFilters()
+            .Where(a => a.OrgId == null || a.OrgId == orgId).OrderBy(a => a.OrgId == null).ThenBy(a => a.Name).ToListAsync(ct);
         var running = await db.BuildJobs.AsNoTracking()
             .Where(j => j.AgentId != null && (j.Status == JobStatus.Assigned || j.Status == JobStatus.Running))
-            .Join(db.Builds, j => j.BuildId, b => b.Id, (j, b) => new { j.AgentId, j.Id, j.TaskName, b.Number, BuildId = b.Id, b.PipelineId })
-            .Join(db.Pipelines, x => x.PipelineId, p => p.Id, (x, p) => new { x.AgentId, x.Id, x.TaskName, x.Number, x.BuildId, p.Name })
+            .Join(db.Builds.IgnoreQueryFilters().Where(b => b.OrgId == orgId), j => j.BuildId, b => b.Id,
+                (j, b) => new { j.AgentId, j.Id, j.TaskName, b.Number, BuildId = b.Id, b.PipelineId })
+            .Join(db.Pipelines.IgnoreQueryFilters(), x => x.PipelineId, p => p.Id, (x, p) => new { x.AgentId, x.Id, x.TaskName, x.Number, x.BuildId, p.Name })
             .ToListAsync(ct);
         return agents.Select(a => a.ToDto(metrics.Latest(a.Id),
             running.Where(r => r.AgentId == a.Id)
                 .Select(r => new AgentRunningJobDto(r.BuildId, r.Number, r.Name, r.Id, r.TaskName)).ToList())).ToList();
     }
 
-    public async Task PublishAgentsAsync(CancellationToken ct) => await ui.AgentsUpdated(await ListAsync(ct));
+    /// <summary>Sends every organization its agent list (metrics included).</summary>
+    public async Task PublishAgentsAsync(CancellationToken ct)
+    {
+        foreach (var orgId in await db.Organizations.AsNoTracking().Select(o => o.Id).ToListAsync(ct))
+            await ui.AgentsUpdated(orgId, await ListForOrgAsync(orgId, ct));
+    }
 
     public async Task<AgentDto> UpdateAsync(Guid agentId, AgentUpdateInput input, CancellationToken ct)
     {
-        var agent = await db.Agents.FirstOrDefaultAsync(a => a.Id == agentId, ct) ?? throw new NotFoundException("Agent");
+        var agent = await OwnAgentAsync(agentId, ct);
         agent.SetEnabled(input.Enabled);
         await db.SaveChangesAsync(ct);
         if (input.Enabled) scheduler.Wake();
@@ -217,7 +230,7 @@ public sealed class AgentService(
 
     public async Task DeleteAsync(Guid agentId, CancellationToken ct)
     {
-        var agent = await db.Agents.FirstOrDefaultAsync(a => a.Id == agentId, ct) ?? throw new NotFoundException("Agent");
+        var agent = await OwnAgentAsync(agentId, ct);
         if (agent.Online) throw new DomainException("Stop the agent before removing it.");
         db.Agents.Remove(agent);
         await db.SaveChangesAsync(ct);
@@ -225,11 +238,27 @@ public sealed class AgentService(
         await PublishAgentsAsync(ct);
     }
 
+    /// <summary>An agent the current organization manages (admins only; shared agents are managed by whoever runs them).</summary>
+    private async Task<Agent> OwnAgentAsync(Guid agentId, CancellationToken ct)
+    {
+        current.RequireRole(Domain.Organizations.OrgRole.Admin);
+        var agent = await db.Agents.FirstOrDefaultAsync(a => a.Id == agentId, ct) ?? throw new NotFoundException("Agent");
+        if (agent.OrgId is null) throw new ForbiddenException("Shared agents are managed by the people who run them.");
+        return agent;
+    }
+
     public IReadOnlyList<AgentMetricsDto> MetricsHistory(Guid agentId) => metrics.History(agentId);
 
     public async Task<bool> RequestCleanupAsync(Guid agentId, AgentCleanupInput input, CancellationToken ct)
     {
-        var activeBuilds = await db.Builds.Where(b => b.Status == BuildStatus.Running || b.Status == BuildStatus.Canceling)
+        await OwnAgentAsync(agentId, ct);
+        return await CleanupAgentAsync(agentId, input, ct);
+    }
+
+    /// <summary>Asks an agent to clean up; workspaces of active builds (any organization) are kept.</summary>
+    public async Task<bool> CleanupAgentAsync(Guid agentId, AgentCleanupInput input, CancellationToken ct)
+    {
+        var activeBuilds = await db.Builds.IgnoreQueryFilters().Where(b => b.Status == BuildStatus.Running || b.Status == BuildStatus.Canceling)
             .Select(b => b.Id).ToArrayAsync(ct);
         return await gateway.CleanupAsync(agentId,
             new CleanupRequest(Guid.NewGuid(), activeBuilds, input.RemoveWorkspaces, input.DockerPrune), ct);

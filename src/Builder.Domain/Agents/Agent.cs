@@ -3,6 +3,8 @@ namespace Builder.Domain.Agents;
 public sealed class Agent
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7();
+    /// <summary>Owning organization; null for a shared agent that serves every organization.</summary>
+    public Guid? OrgId { get; private set; }
     public string Name { get; private set; } = "";
     public string HostName { get; private set; } = "";
     public string Os { get; private set; } = "";
@@ -17,8 +19,9 @@ public sealed class Agent
 
     private Agent() { }
 
-    public Agent(string name, DateTimeOffset now)
+    public Agent(Guid? orgId, string name, DateTimeOffset now)
     {
+        OrgId = orgId;
         Name = name;
         CreatedAt = now;
     }
@@ -46,6 +49,9 @@ public sealed class Agent
     }
 
     public void SetEnabled(bool enabled) => Enabled = enabled;
+
+    /// <summary>Shared agents serve every organization; others only their own.</summary>
+    public bool Serves(Guid orgId) => OrgId is null || OrgId == orgId;
 
     public bool Matches(IReadOnlyCollection<string> requiredLabels) =>
         requiredLabels.All(l => Labels.Contains(l.ToLowerInvariant()));

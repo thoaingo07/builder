@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
+using Builder.Application;
 using Builder.Application.Abstractions;
 using Builder.Application.Dtos;
 using Builder.Infrastructure.Git;
@@ -145,22 +146,51 @@ public sealed class SchedulerSignal : ISchedulerSignal
 
 public sealed class AzureDevOpsClient(HttpClient http) : IAzureDevOpsClient
 {
-    public async Task<IReadOnlyList<RepositoryDto>> ListRepositoriesAsync(string organizationUrl, string? username, string token, CancellationToken ct)
+    public async Task<int> TestAsync(string organizationUrl, string authorization, CancellationToken ct) =>
+        (await ListProjectsAsync(organizationUrl, authorization, ct)).Count;
+
+    public async Task<IReadOnlyList<string>> ListProjectsAsync(string organizationUrl, string authorization, CancellationToken ct)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Get, $"{organizationUrl.TrimEnd('/')}/_apis/git/repositories?api-version=7.1");
-        req.Headers.Authorization = new AuthenticationHeaderValue("Basic",
-            Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username ?? ""}:{token}")));
-        using var res = await http.SendAsync(req, ct);
-        if (!res.IsSuccessStatusCode)
-            throw new InvalidOperationException($"Azure DevOps returned {(int)res.StatusCode} {res.ReasonPhrase}. Check the organization URL and the PAT (needs Code: Read).");
-        var body = await res.Content.ReadFromJsonAsync<RepoList>(ct);
-        return (body?.Value ?? [])
-            .Select(r => new RepositoryDto(r.Project?.Name ?? "", r.Name, r.RemoteUrl,
+        var body = await GetAsync<ListOf<Project>>(organizationUrl, "_apis/projects?$top=500&api-version=7.1", authorization, ct);
+        return body.Value.Select(p => p.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    public async Task<IReadOnlyList<RemoteRepositoryDto>> ListRepositoriesAsync(string organizationUrl, string? project, string authorization,
+        CancellationToken ct)
+    {
+        var path = string.IsNullOrWhiteSpace(project)
+            ? "_apis/git/repositories?api-version=7.1"
+            : $"{Uri.EscapeDataString(project)}/_apis/git/repositories?api-version=7.1";
+        var body = await GetAsync<ListOf<Repo>>(organizationUrl, path, authorization, ct);
+        return body.Value
+            .Where(r => r.IsDisabled != true)
+            .Select(r => new RemoteRepositoryDto(r.Project?.Name ?? "", r.Name, CleanCloneUrl(r.RemoteUrl),
                 r.DefaultBranch?.Replace("refs/heads/", "")))
             .OrderBy(r => r.Project).ThenBy(r => r.Name).ToList();
     }
 
-    private sealed record RepoList(List<Repo> Value);
-    private sealed record Repo(string Name, string RemoteUrl, string? DefaultBranch, Project? Project);
+    /// <summary>Azure DevOps puts the org name in the URL's user part (https://org@dev.azure.com/...); auth comes from the header instead.</summary>
+    public static string CleanCloneUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var u) && u.UserInfo.Length > 0
+            ? new UriBuilder(u) { UserName = "", Password = "" }.Uri.ToString()
+            : url;
+
+    private async Task<T> GetAsync<T>(string organizationUrl, string path, string authorization, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"{organizationUrl.TrimEnd('/')}/{path}");
+        req.Headers.TryAddWithoutValidation("Authorization", authorization);
+        using var res = await http.SendAsync(req, ct);
+        // Azure DevOps answers bad credentials with a 203 sign-in page or a 401
+        if (res.StatusCode == System.Net.HttpStatusCode.NonAuthoritativeInformation || res.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            throw new ExternalServiceException("Azure DevOps rejected the credentials. Check the PAT (scope: Code → Read) and that it belongs to this organization.");
+        if (res.StatusCode == System.Net.HttpStatusCode.NotFound)
+            throw new ExternalServiceException($"Azure DevOps returned 404 for {organizationUrl}. Check the organization URL (https://dev.azure.com/<org>).");
+        if (!res.IsSuccessStatusCode)
+            throw new ExternalServiceException($"Azure DevOps returned {(int)res.StatusCode} {res.ReasonPhrase}.");
+        return await res.Content.ReadFromJsonAsync<T>(ct) ?? throw new ExternalServiceException("Empty response from Azure DevOps.");
+    }
+
+    private sealed record ListOf<T>(List<T> Value);
+    private sealed record Repo(string Name, string RemoteUrl, string? DefaultBranch, Project? Project, bool? IsDisabled);
     private sealed record Project(string Name);
 }

@@ -34,7 +34,7 @@ public sealed class DeployTests(AspireFixture aspire) : IDisposable
 
         var repo = E2E.CreateRepository(_repoDir, new Dictionary<string, string>
         {
-            ["Taskfile.yml"] = $$"""
+            [".builder/runners/deploy.yml"] = $$"""
                 version: '3'
                 tasks:
                   deploy:
@@ -55,11 +55,7 @@ public sealed class DeployTests(AspireFixture aspire) : IDisposable
                     command: ["sh", "-c", "echo build-BUILD_MARK > /usr/share/nginx/html/index.html && exec nginx -g 'daemon off;'"]
                 """,
         });
-        var pipeline = await E2E.PostAsync(http, "/api/pipelines", new
-        {
-            name = $"deploy-{suffix}", repositoryUrl = repo, defaultBranch = "main", entryTask = "deploy",
-        });
-        var pipelineId = pipeline["id"]!.GetValue<string>();
+        var pipelineId = await E2E.MapRunnerAsync(http, repo, ".builder/runners/deploy.yml", entryTask: "deploy");
 
         try
         {

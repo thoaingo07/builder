@@ -42,7 +42,8 @@ public sealed class SchedulerService(
 
         foreach (var job in queued)
         {
-            var agent = PickAgent(job, agents, busy);
+            var orgId = await db.Builds.IgnoreQueryFilters().Where(b => b.Id == job.BuildId).Select(b => b.OrgId).FirstAsync(ct);
+            var agent = PickAgent(job, orgId, agents, busy);
             if (agent is null) continue;
 
             var build = await db.Builds.Include(b => b.Jobs).FirstAsync(b => b.Id == job.BuildId, ct);
@@ -80,17 +81,19 @@ public sealed class SchedulerService(
         return assigned;
     }
 
-    private static Agent? PickAgent(BuildJob job, List<Agent> agents, Dictionary<Guid, int> busy) =>
+    private static Agent? PickAgent(BuildJob job, Guid orgId, List<Agent> agents, Dictionary<Guid, int> busy) =>
         agents
-            .Where(a => a.Matches(job.Labels) && busy.GetValueOrDefault(a.Id) < a.Capacity)
-            .OrderBy(a => (double)busy.GetValueOrDefault(a.Id) / a.Capacity)
+            .Where(a => a.Serves(orgId) && a.Matches(job.Labels) && busy.GetValueOrDefault(a.Id) < a.Capacity)
+            // an organization's own agents first, then the shared pool
+            .OrderBy(a => a.OrgId is null ? 1 : 0)
+            .ThenBy(a => (double)busy.GetValueOrDefault(a.Id) / a.Capacity)
             .ThenBy(a => a.Name)
             .FirstOrDefault();
 
     private async Task<JobAssignment> BuildAssignmentAsync(Build build, BuildJob job, CancellationToken ct)
     {
-        var pipeline = await db.Pipelines.AsNoTracking().FirstAsync(p => p.Id == build.PipelineId, ct);
-        var remote = await remotes.ForPipelineAsync(pipeline, ct);
+        var pipeline = await db.Pipelines.AsNoTracking().IgnoreQueryFilters().FirstAsync(p => p.Id == build.PipelineId, ct);
+        var (remote, _) = await remotes.ForPipelineAsync(pipeline, ct);
 
         // artifacts produced by any upstream job
         var upstream = Upstream(build, job);
@@ -115,7 +118,7 @@ public sealed class SchedulerService(
         DeployTarget? deploy = null;
         if (job.Deploy is { } spec)
         {
-            var e = await db.Environments.AsNoTracking().FirstOrDefaultAsync(x => x.Name == spec.Environment, ct)
+            var e = await db.Environments.AsNoTracking().IgnoreQueryFilters().FirstOrDefaultAsync(x => x.OrgId == build.OrgId && x.Name == spec.Environment, ct)
                 ?? throw new InvalidOperationException($"Environment '{spec.Environment}' no longer exists.");
             deploy = ToTarget(e, spec, build);
         }
@@ -146,7 +149,7 @@ public sealed class SchedulerService(
     {
         if (job.Deploy is not { } spec) return;
         if (await db.Deployments.AnyAsync(d => d.JobId == job.Id, ct)) return;
-        var env = await db.Environments.AsNoTracking().FirstAsync(e => e.Name == spec.Environment, ct);
+        var env = await db.Environments.AsNoTracking().IgnoreQueryFilters().FirstAsync(e => e.OrgId == build.OrgId && e.Name == spec.Environment, ct);
         db.Deployments.Add(new Deployment(env, build.PipelineId, build.Id, build.Number, job.Id,
             DeploymentName(spec, build), spec.Compose, spec.Manifests, spec.Url, clock.UtcNow));
     }

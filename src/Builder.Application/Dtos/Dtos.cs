@@ -1,6 +1,7 @@
 using Builder.Domain.Builds;
 using Builder.Domain.Connections;
 using Builder.Domain.Deployments;
+using Builder.Domain.Organizations;
 
 namespace Builder.Application.Dtos;
 
@@ -31,12 +32,13 @@ public sealed record BuildDetailDto(
 
 public sealed record LogLineDto(long Id, Guid JobId, DateTimeOffset Timestamp, LogStreamKind Stream, string Text);
 
+/// <summary>A runner: one mapped file from a repository's .builder/runners folder.</summary>
 public sealed record PipelineDto(
-    Guid Id, string Name, Guid? ConnectionId, string? ConnectionName, string RepositoryUrl, string DefaultBranch,
+    Guid Id, string Name, Guid RepositoryId, string RepositoryName, string RepositoryUrl, string DefaultBranch,
     string TaskfilePath, string? EntryTask, BuildSummaryDto? LastBuild);
 
-public sealed record PipelineInput(string Name, Guid? ConnectionId, string RepositoryUrl, string? DefaultBranch,
-    string? TaskfilePath, string? EntryTask);
+/// <summary>Rename a runner or change its default entry task (the file it runs never changes).</summary>
+public sealed record PipelineInput(string Name, string? EntryTask);
 
 public sealed record TaskfileDto(string Path, string Branch, string Commit, string Content);
 public sealed record SaveTaskfileInput(string? Branch, string Content, string? Message);
@@ -54,7 +56,7 @@ public sealed record AgentMetricsDto(
 public sealed record AgentRunningJobDto(Guid BuildId, int BuildNumber, string PipelineName, Guid JobId, string TaskName);
 
 public sealed record AgentDto(
-    Guid Id, string Name, string HostName, string Os, string Version, int Capacity, List<string> Labels,
+    Guid Id, bool Shared, string Name, string HostName, string Os, string Version, int Capacity, List<string> Labels,
     bool Enabled, bool Online, DateTimeOffset? LastSeenAt, AgentMetricsDto? Metrics, List<AgentRunningJobDto> RunningJobs);
 
 public sealed record AgentUpdateInput(bool Enabled);
@@ -79,7 +81,30 @@ public sealed record DeploymentDto(
 
 public sealed record ConnectionDto(Guid Id, string Name, ConnectionType Type, string Url, string? Username, bool HasToken);
 public sealed record ConnectionInput(string Name, ConnectionType Type, string Url, string? Username, string? Token);
-public sealed record RepositoryDto(string Project, string Name, string Url, string? DefaultBranch);
+public sealed record ConnectionTestDto(bool Ok, string Message);
+/// <summary>A repository as the git host lists it (Azure DevOps picker).</summary>
+public sealed record RemoteRepositoryDto(string Project, string Name, string Url, string? DefaultBranch);
+
+public sealed record RepositoryDto(Guid Id, string Name, string Url, Guid? ConnectionId, string? ConnectionName,
+    string DefaultBranch, int RunnerCount, DateTimeOffset CreatedAt);
+public sealed record RepositoryInput(Guid? ConnectionId, string? Name, string Url, string? DefaultBranch);
+
+/// <summary>A file in .builder/runners at a branch, with what Builder would run, and whether it is mapped.</summary>
+public sealed record RunnerFileDto(string Path, string SuggestedName, string? EntryTask, List<string> Tasks,
+    string? Error, Guid? MappedRunnerId, string? MappedRunnerName);
+public sealed record RunnerFilesDto(string Branch, string Commit, List<RunnerFileDto> Files);
+public sealed record MapRunnerInput(string Path, string? Name, string? EntryTask);
+public sealed record MapRunnersInput(List<MapRunnerInput> Runners);
+
+public sealed record OrgDto(Guid Id, string Name, string Slug, OrgRole Role, int MemberCount, DateTimeOffset CreatedAt);
+public sealed record OrgInput(string Name);
+public sealed record OrgCreatedDto(OrgDto Org, string AgentToken);
+public sealed record AgentTokenDto(string AgentToken);
+public sealed record MemberDto(Guid UserId, string UserName, string DisplayName, string? Email, OrgRole Role,
+    bool CanSignInWithGoogle, DateTimeOffset JoinedAt);
+public sealed record AddMemberInput(string Email, OrgRole Role);
+public sealed record ChangeRoleInput(OrgRole Role);
+public sealed record MeDto(UserDto User, List<OrgDto> Orgs);
 
 public sealed record CleanupInput(int OlderThanDays, int KeepLastPerPipeline, bool RemoveWorkspaces, bool DockerPrune);
 public sealed record CleanupResultDto(int BuildsDeleted, int ArtifactsDeleted, long BytesFreed, int AgentsNotified);

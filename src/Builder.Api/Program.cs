@@ -82,7 +82,7 @@ app.UseExceptionHandler(errors => errors.Run(async context =>
         ForbiddenException => (StatusCodes.Status403Forbidden, ex.Message),
         DbUpdateConcurrencyException => (StatusCodes.Status409Conflict, "Someone else changed this at the same time. Try again."),
         BadHttpRequestException bad => (bad.StatusCode, "The request was not valid."),
-        InvalidOperationException => (StatusCodes.Status502BadGateway, ex.Message),
+        ExternalServiceException => (StatusCodes.Status502BadGateway, ex.Message),
         _ => (StatusCodes.Status500InternalServerError, "Unexpected server error."),
     };
     context.Response.StatusCode = status;

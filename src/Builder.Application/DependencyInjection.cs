@@ -1,3 +1,4 @@
+using Builder.Application.Abstractions;
 using Builder.Application.Services;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -6,6 +7,9 @@ namespace Builder.Application;
 public static class DependencyInjection
 {
     public static IServiceCollection AddApplication(this IServiceCollection services) => services
+        .AddScoped<ICurrentOrg, CurrentOrg>()
+        .AddScoped<OrganizationService>()
+        .AddScoped<RepositoryService>()
         .AddScoped<GitRemotes>()
         .AddScoped<BuildEvents>()
         .AddScoped<BuildService>()

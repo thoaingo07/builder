@@ -27,19 +27,19 @@ public sealed class BuildPlanningService(
             .OrderBy(b => b.QueuedAt).FirstOrDefaultAsync(ct);
         if (build is null) return false;
 
-        var pipeline = await db.Pipelines.AsNoTracking().FirstAsync(p => p.Id == build.PipelineId, ct);
+        var pipeline = await db.Pipelines.AsNoTracking().IgnoreQueryFilters().FirstAsync(p => p.Id == build.PipelineId, ct);
         string commit;
         List<BuildJob> jobs;
         string entry;
         try
         {
-            var remote = await remotes.ForPipelineAsync(pipeline, ct);
+            var (remote, _) = await remotes.ForPipelineAsync(pipeline, ct);
             commit = build.Commit ?? await git.ResolveBranchAsync(remote, build.Branch, ct);
             var yaml = await git.ReadFileAsync(remote, build.Branch, commit, pipeline.TaskfilePath, ct)
                 ?? throw new TaskfileException($"'{pipeline.TaskfilePath}' was not found at {commit[..Math.Min(8, commit.Length)]}.");
             var plan = planner.Plan(yaml, string.IsNullOrEmpty(build.EntryTask) ? pipeline.EntryTask : build.EntryTask);
             entry = plan.EntryTask;
-            jobs = await ToJobsAsync(plan, ct);
+            jobs = await ToJobsAsync(plan, build.OrgId, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -65,10 +65,10 @@ public sealed class BuildPlanningService(
         return true;
     }
 
-    private async Task<List<BuildJob>> ToJobsAsync(TaskfilePlan plan, CancellationToken ct)
+    private async Task<List<BuildJob>> ToJobsAsync(TaskfilePlan plan, Guid orgId, CancellationToken ct)
     {
         var envNames = plan.Jobs.Where(j => j.Deploy is not null).Select(j => j.Deploy!.Environment).Distinct().ToList();
-        var envs = await db.Environments.AsNoTracking().Where(e => envNames.Contains(e.Name)).ToListAsync(ct);
+        var envs = await db.Environments.AsNoTracking().IgnoreQueryFilters().Where(e => e.OrgId == orgId && envNames.Contains(e.Name)).ToListAsync(ct);
         var missing = envNames.Except(envs.Select(e => e.Name), StringComparer.OrdinalIgnoreCase).ToList();
         if (missing.Count > 0)
             throw new TaskfileException($"Unknown deploy environment(s): {string.Join(", ", missing)}. Create them under Environments.");

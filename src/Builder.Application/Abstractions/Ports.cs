@@ -4,7 +4,9 @@ using Builder.Domain.Agents;
 using Builder.Domain.Builds;
 using Builder.Domain.Connections;
 using Builder.Domain.Deployments;
+using Builder.Domain.Organizations;
 using Builder.Domain.Pipelines;
+using Builder.Domain.Repositories;
 using Builder.Domain.Users;
 using Microsoft.EntityFrameworkCore;
 
@@ -22,6 +24,9 @@ public interface IAppDbContext
     DbSet<Deployment> Deployments { get; }
     DbSet<GitConnection> Connections { get; }
     DbSet<User> Users { get; }
+    DbSet<Organization> Organizations { get; }
+    DbSet<Membership> Memberships { get; }
+    DbSet<Repository> Repositories { get; }
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 }
 
@@ -40,6 +45,12 @@ public interface IGitService
 
     /// <summary>Reads a file at a commit; null when the file does not exist.</summary>
     Task<string?> ReadFileAsync(GitRemote remote, string branch, string commit, string path, CancellationToken ct);
+
+    /// <summary>Files directly inside <paramref name="folder"/> at a commit (paths relative to the repository root).</summary>
+    Task<IReadOnlyList<string>> ListFilesAsync(GitRemote remote, string branch, string commit, string folder, CancellationToken ct);
+
+    /// <summary>Branch names on the remote.</summary>
+    Task<IReadOnlyList<string>> ListBranchesAsync(GitRemote remote, CancellationToken ct);
 
     /// <summary>Writes one file on a branch, commits and pushes. Returns the new commit SHA.</summary>
     Task<string> CommitFileAsync(GitRemote remote, string branch, string path, string content, string message,
@@ -78,13 +89,33 @@ public interface IAgentGateway
     Task<bool> TeardownAsync(Guid agentId, TeardownRequest request, CancellationToken ct);
 }
 
+/// <summary>Live updates for the UI; organization-wide events only reach that organization's members.</summary>
 public interface IUiNotifier
 {
-    Task BuildUpdated(BuildSummaryDto build);
+    Task BuildUpdated(Guid orgId, BuildSummaryDto build);
     Task JobUpdated(JobDto job);
     Task Log(Guid buildId, IReadOnlyList<LogLineDto> lines);
-    Task AgentsUpdated(IReadOnlyList<AgentDto> agents);
-    Task DeploymentUpdated(DeploymentDto deployment);
+    Task AgentsUpdated(Guid orgId, IReadOnlyList<AgentDto> agents);
+    Task DeploymentUpdated(Guid orgId, DeploymentDto deployment);
+}
+
+/// <summary>
+/// The organization the current request acts in (set by the API from the X-Org header after checking
+/// membership). Null outside a request (scheduler, agents) - then queries are not organization-filtered.
+/// </summary>
+public interface ICurrentOrg
+{
+    Guid? OrgId { get; }
+    OrgRole? Role { get; }
+    Guid? UserId { get; }
+    void Set(Guid orgId, OrgRole role, Guid userId);
+
+    Guid RequireOrgId() => OrgId ?? throw new ForbiddenException("Select an organization first.");
+
+    void RequireRole(OrgRole minimum)
+    {
+        if (Role is null || Role < minimum) throw new ForbiddenException($"This needs the {minimum} role in the organization.");
+    }
 }
 
 public interface ISecretProtector
@@ -99,9 +130,14 @@ public interface IPasswordHasher
     bool Verify(string hash, string password);
 }
 
+/// <summary>Azure DevOps REST (api-version 7.1). <paramref name="authorization"/> is a full Authorization header value.</summary>
 public interface IAzureDevOpsClient
 {
-    Task<IReadOnlyList<RepositoryDto>> ListRepositoriesAsync(string organizationUrl, string? username, string token, CancellationToken ct);
+    /// <summary>Checks the organization URL and credentials; returns the number of visible projects.</summary>
+    Task<int> TestAsync(string organizationUrl, string authorization, CancellationToken ct);
+    Task<IReadOnlyList<string>> ListProjectsAsync(string organizationUrl, string authorization, CancellationToken ct);
+    /// <summary>Enabled repositories, of one project or of the whole organization.</summary>
+    Task<IReadOnlyList<RemoteRepositoryDto>> ListRepositoriesAsync(string organizationUrl, string? project, string authorization, CancellationToken ct);
 }
 
 public interface IArtifactStore
@@ -135,4 +171,18 @@ public interface ISchedulerSignal
 {
     void Wake();
     Task WaitAsync(TimeSpan timeout, CancellationToken ct);
+}
+
+public sealed class CurrentOrg : ICurrentOrg
+{
+    public Guid? OrgId { get; private set; }
+    public OrgRole? Role { get; private set; }
+    public Guid? UserId { get; private set; }
+
+    public void Set(Guid orgId, OrgRole role, Guid userId)
+    {
+        OrgId = orgId;
+        Role = role;
+        UserId = userId;
+    }
 }

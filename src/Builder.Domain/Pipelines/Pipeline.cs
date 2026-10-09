@@ -1,38 +1,44 @@
+using Builder.Domain.Organizations;
+using Builder.Domain.Repositories;
+
 namespace Builder.Domain.Pipelines;
 
-public sealed class Pipeline
+/// <summary>
+/// A runner: one Taskfile under <c>.builder/runners/</c> of a repository, mapped into Builder. Running it runs that
+/// file (from the repository root) on the branch the build asks for.
+/// </summary>
+public sealed class Pipeline : IOrgScoped
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7();
+    public Guid OrgId { get; private set; }
+    public Guid RepositoryId { get; private set; }
     public string Name { get; private set; } = "";
-    public Guid? ConnectionId { get; private set; }
-    public string RepositoryUrl { get; private set; } = "";
-    public string DefaultBranch { get; private set; } = "main";
-    public string TaskfilePath { get; private set; } = "Taskfile.yml";
+    /// <summary>Path of the runner Taskfile inside the repository, e.g. <c>.builder/runners/ci.yml</c>.</summary>
+    public string TaskfilePath { get; private set; } = "";
     public string? EntryTask { get; private set; }
     public int LastBuildNumber { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
     private Pipeline() { }
 
-    public Pipeline(string name, Guid? connectionId, string repositoryUrl, string defaultBranch,
-        string taskfilePath, string? entryTask, DateTimeOffset now)
+    public Pipeline(Repository repository, string name, string taskfilePath, string? entryTask, DateTimeOffset now)
     {
+        OrgId = repository.OrgId;
+        RepositoryId = repository.Id;
+        TaskfilePath = taskfilePath.Trim().TrimStart('/');
         CreatedAt = now;
-        Update(name, connectionId, repositoryUrl, defaultBranch, taskfilePath, entryTask);
+        Update(name, entryTask);
     }
 
-    public void Update(string name, Guid? connectionId, string repositoryUrl, string defaultBranch,
-        string taskfilePath, string? entryTask)
+    public void Update(string name, string? entryTask)
     {
-        if (string.IsNullOrWhiteSpace(name)) throw new DomainException("Pipeline name is required.");
-        if (string.IsNullOrWhiteSpace(repositoryUrl)) throw new DomainException("Repository URL is required.");
+        if (string.IsNullOrWhiteSpace(name)) throw new DomainException("Runner name is required.");
         Name = name.Trim();
-        ConnectionId = connectionId;
-        RepositoryUrl = repositoryUrl.Trim();
-        DefaultBranch = string.IsNullOrWhiteSpace(defaultBranch) ? "main" : defaultBranch.Trim();
-        TaskfilePath = string.IsNullOrWhiteSpace(taskfilePath) ? "Taskfile.yml" : taskfilePath.Trim().TrimStart('/');
         EntryTask = string.IsNullOrWhiteSpace(entryTask) ? null : entryTask.Trim();
     }
 
     public int NextBuildNumber() => ++LastBuildNumber;
+
+    /// <summary>Runner name from its file: <c>.builder/runners/deploy-prod.yml</c> → <c>deploy-prod</c>.</summary>
+    public static string NameFromFile(string path) => Path.GetFileNameWithoutExtension(path);
 }

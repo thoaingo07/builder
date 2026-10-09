@@ -9,3 +9,4 @@ namespace Builder.Migrations;
 
 [Migration(1, "initial_schema")] public sealed class M000001 : SqlFileMigration;
 [Migration(2, "user_email")] public sealed class M000002 : SqlFileMigration;
+[Migration(3, "organizations")] public sealed class M000003 : SqlFileMigration;

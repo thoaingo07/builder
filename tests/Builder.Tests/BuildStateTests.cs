@@ -15,7 +15,7 @@ public class BuildStateTests
 
     private static Build Planned(params BuildJob[] jobs)
     {
-        var build = Build.Queue(Guid.NewGuid(), 1, "main", null, null, "bob", Now);
+        var build = Build.Queue(Guid.NewGuid(), Guid.NewGuid(), 1, "main", null, null, "bob", Now);
         build.Planned("abc", "ci", jobs, Now);
         return build;
     }

@@ -10,7 +10,8 @@ namespace Builder.Tests;
 /// <summary>Helpers for end-to-end tests that talk to the stack through the BFF, like the UI does.</summary>
 internal static class E2E
 {
-    public static async Task<HttpClient> LoginAsync(AspireFixture aspire)
+    /// <summary>Signs in as admin and switches to a fresh organization (X-Org header), so tests never share data.</summary>
+    public static async Task<HttpClient> LoginAsync(AspireFixture aspire, bool withOrganization = true)
     {
         var http = new HttpClient(new HttpClientHandler { CookieContainer = new CookieContainer() })
         {
@@ -20,7 +21,24 @@ internal static class E2E
         await WaitUntilAsync(async () =>
             (await http.PostAsJsonAsync("/bff/login", new { userName = "admin", password = "admin" })).IsSuccessStatusCode,
             "login");
+        if (withOrganization)
+        {
+            var org = await PostAsync(http, "/api/orgs", new { name = "test " + Guid.NewGuid().ToString("N")[..8] });
+            http.DefaultRequestHeaders.Add("X-Org", org["org"]!["id"]!.GetValue<string>());
+        }
         return http;
+    }
+
+    /// <summary>Adds the repository to the current organization and maps one runner file; returns the runner id.</summary>
+    public static async Task<string> MapRunnerAsync(HttpClient http, string repositoryUrl, string runnerFile, string? entryTask = null,
+        string defaultBranch = "main")
+    {
+        var repos = await GetAsync(http, "/api/repositories");
+        var repo = repos.AsArray().FirstOrDefault(r => r!["url"]!.GetValue<string>() == repositoryUrl)
+            ?? await PostAsync(http, "/api/repositories", new { url = repositoryUrl, defaultBranch });
+        var mapped = await PostAsync(http, $"/api/repositories/{repo["id"]}/runners",
+            new { runners = new[] { new { path = runnerFile, entryTask } } });
+        return mapped.AsArray().Single()!["id"]!.GetValue<string>();
     }
 
     public static async Task<JsonNode> PostAsync(HttpClient http, string url, object body)
@@ -68,8 +86,9 @@ internal static class E2E
         Assert.Fail($"Timed out waiting for {what}.");
     }
 
-    /// <summary>Creates a bare git repository with the given files on branch main; returns its path.</summary>
-    public static string CreateRepository(string root, IReadOnlyDictionary<string, string> files)
+    /// <summary>Creates a bare git repository with the given files on branch main (and optional extra branches); returns its path.</summary>
+    public static string CreateRepository(string root, IReadOnlyDictionary<string, string> files,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>? branches = null)
     {
         var bare = Path.Combine(root, "repo.git");
         var work = Path.Combine(root, "work");
@@ -84,6 +103,18 @@ internal static class E2E
         Git(work, "add", "-A");
         Git(work, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "init");
         Git(work, "push", "--quiet", bare, "HEAD:main");
+        foreach (var (branch, branchFiles) in branches ?? new Dictionary<string, IReadOnlyDictionary<string, string>>())
+        {
+            Git(work, "checkout", "--quiet", "-b", branch, "main");
+            foreach (var (path, content) in branchFiles)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(work, path))!);
+                File.WriteAllText(Path.Combine(work, path), content);
+            }
+            Git(work, "add", "-A");
+            Git(work, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", branch);
+            Git(work, "push", "--quiet", bare, $"HEAD:{branch}");
+        }
         return bare;
     }
 
