@@ -8,6 +8,8 @@ using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using Yarp.ReverseProxy.Transforms;
 
+const string ExternalScheme = "external";
+
 // Backend-for-frontend: the browser holds only an HttpOnly session cookie. The BFF proxies
 // /api/* and /hubs/ui to the API and attaches a short-lived JWT minted from the cookie.
 var builder = WebApplication.CreateBuilder(args);
@@ -33,6 +35,35 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         o.Events.OnRedirectToLogin = c => { c.Response.StatusCode = 401; return Task.CompletedTask; };
         o.Events.OnRedirectToAccessDenied = c => { c.Response.StatusCode = 403; return Task.CompletedTask; };
     });
+// Google sign-in (optional): Google signs in to a short-lived "external" cookie; /bff/login/google/done then
+// asks the API whether that verified e-mail belongs to a predefined user before issuing the real session.
+var googleClientId = config["Auth:Google:ClientId"];
+var googleEnabled = !string.IsNullOrWhiteSpace(googleClientId) && !string.IsNullOrWhiteSpace(config["Auth:Google:ClientSecret"]);
+if (googleEnabled)
+{
+    builder.Services.AddAuthentication()
+        .AddCookie(ExternalScheme, o =>
+        {
+            o.Cookie.Name = "builder.external";
+            o.Cookie.SameSite = SameSiteMode.Lax;
+            o.Cookie.HttpOnly = true;
+            o.ExpireTimeSpan = TimeSpan.FromMinutes(5);
+        })
+        .AddGoogle(o =>
+        {
+            o.SignInScheme = ExternalScheme;
+            o.ClientId = googleClientId!;
+            o.ClientSecret = config["Auth:Google:ClientSecret"]!;
+            o.CallbackPath = "/signin-google";
+            o.ClaimActions.MapJsonKey("email_verified", "email_verified");
+            o.Events.OnRemoteFailure = c =>
+            {
+                c.Response.Redirect("/login?error=google_failed");
+                c.HandleResponse();
+                return Task.CompletedTask;
+            };
+        });
+}
 builder.Services.AddAuthorization();
 builder.Services.AddHttpClient("api", c => c.BaseAddress = new Uri(apiUrl));
 
@@ -51,6 +82,19 @@ builder.Services.AddReverseProxy()
     }));
 
 var app = builder.Build();
+
+// Behind a TLS proxy (tailscale serve, Caddy, ...) the BFF must build URLs - the Google redirect URI, Secure
+// cookies - for the address users see, not the local one. Auth:PublicOrigin = https://host:port.
+if (config["Auth:PublicOrigin"] is { Length: > 0 } publicOrigin)
+{
+    var origin = new Uri(publicOrigin);
+    app.Use((ctx, next) =>
+    {
+        ctx.Request.Scheme = origin.Scheme;
+        ctx.Request.Host = new HostString(origin.Authority);
+        return next();
+    });
+}
 
 var uiRoot = Path.GetFullPath(config["Ui:Path"] ?? Path.Combine(builder.Environment.ContentRootPath, "../../ui/dist"));
 if (Directory.Exists(uiRoot))
@@ -91,12 +135,40 @@ app.MapPost("/bff/login", async (LoginRequest input, HttpContext ctx, IHttpClien
         return Results.Problem(title: "Wrong user name or password.", statusCode: 401);
     response.EnsureSuccessStatusCode();
     var user = (await response.Content.ReadFromJsonAsync<UserInfo>(ct))!;
-
-    var identity = new ClaimsIdentity(
-        [new Claim("sub", user.UserName), new Claim("name", user.DisplayName), new Claim("admin", user.IsAdmin ? "true" : "false")],
-        CookieAuthenticationDefaults.AuthenticationScheme, "sub", "role");
-    await ctx.SignInAsync(new ClaimsPrincipal(identity));
+    await SignInAsync(ctx, user);
     return Results.Ok(user);
+});
+
+app.MapGet("/bff/providers", () => Results.Ok(new { password = true, google = googleEnabled }));
+
+app.MapGet("/bff/login/google", (string? returnUrl) => googleEnabled
+    ? Results.Challenge(new AuthenticationProperties { RedirectUri = "/bff/login/google/done?returnUrl=" + Uri.EscapeDataString(LocalUrl(returnUrl)) }, ["Google"])
+    : Results.NotFound());
+
+app.MapGet("/bff/login/google/done", async (string? returnUrl, HttpContext ctx, IHttpClientFactory http, CancellationToken ct) =>
+{
+    var external = await ctx.AuthenticateAsync(ExternalScheme);
+    await ctx.SignOutAsync(ExternalScheme);
+    if (!external.Succeeded) return Results.Redirect("/login?error=google_failed");
+
+    var p = external.Principal!;
+    var email = p.FindFirstValue(ClaimTypes.Email) ?? "";
+    var verified = bool.TryParse(p.FindFirstValue("email_verified"), out var v) && v;
+    using var request = new HttpRequestMessage(HttpMethod.Post, "/internal/external-login")
+    {
+        Content = JsonContent.Create(new { provider = "google", email, emailVerified = verified, displayName = p.FindFirstValue(ClaimTypes.Name) }),
+    };
+    request.Headers.Authorization = new("Bearer", jwt.ForService());
+    using var response = await http.CreateClient("api").SendAsync(request, ct);
+    if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+    {
+        app.Logger.LogWarning("Google sign-in refused for {Email} (verified={Verified}): not a predefined user", email, verified);
+        return Results.Redirect("/login?error=not_allowed");
+    }
+    response.EnsureSuccessStatusCode();
+    var user = (await response.Content.ReadFromJsonAsync<UserInfo>(ct))!;
+    await SignInAsync(ctx, user);
+    return Results.Redirect(LocalUrl(returnUrl));
 });
 
 app.MapPost("/bff/logout", async (HttpContext ctx) =>
@@ -128,6 +200,15 @@ if (Directory.Exists(uiRoot))
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 
 app.Run();
+
+static Task SignInAsync(HttpContext ctx, UserInfo user) => ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+    new ClaimsPrincipal(new ClaimsIdentity(
+        [new Claim("sub", user.UserName), new Claim("name", user.DisplayName), new Claim("admin", user.IsAdmin ? "true" : "false")],
+        CookieAuthenticationDefaults.AuthenticationScheme, "sub", "role")));
+
+// Only same-site paths: never redirect to another origin after sign-in.
+static string LocalUrl(string? url) =>
+    !string.IsNullOrEmpty(url) && url.StartsWith('/') && !url.StartsWith("//") && !url.StartsWith("/\\") ? url : "/";
 
 internal sealed record LoginRequest(string UserName, string Password);
 internal sealed record UserInfo(string UserName, string DisplayName, bool IsAdmin);

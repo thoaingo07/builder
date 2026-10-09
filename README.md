@@ -53,6 +53,24 @@ task agent -- agent-1
 task ui:dev                # :19001
 ```
 
+## Sign-in with Google (optional)
+
+Password sign-in always works. To add Google, and let **only predefined people** in:
+
+1. Google Cloud Console → APIs & Services → Credentials → *Create OAuth client ID* → **Web application**.
+   Authorized redirect URI: `<public origin>/signin-google`, e.g. `https://ulab-ser8.tail20ff.ts.net:18010/signin-google`
+   (add `http://localhost:19000/signin-google` for local use).
+2. BFF settings (user-secrets, env or `deploy/.env`):
+   `Auth:Google:ClientId`, `Auth:Google:ClientSecret`, and `Auth:PublicOrigin` when the BFF sits behind a TLS proxy
+   such as `tailscale serve` (so Google gets the public redirect URI and cookies are `Secure`).
+3. API setting: the allowed people, matched by Google-verified e-mail:
+   ```json
+   "Auth": { "AllowedUsers": [ { "Email": "you@gmail.com", "DisplayName": "You", "IsAdmin": true } ] }
+   ```
+   They are created/updated on API start (`Auth__AllowedUsers__0__Email=…` as env vars). Anyone else who signs in
+   with Google is sent back to the login page with "not allowed". Removing someone from the list does not delete
+   the user; delete the row to revoke access.
+
 ## Tests
 
 ```bash

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { FormError, FormSubmitEvent } from '@nuxt/ui'
 import { ApiError } from '@/api/client'
@@ -11,8 +11,31 @@ const router = useRouter()
 const route = useRoute()
 
 const state = reactive({ userName: '', password: '' })
-const error = ref<string | null>(null)
 const busy = ref(false)
+const googleEnabled = ref(false)
+
+// errors the BFF reports back after a Google round trip
+const googleErrors: Record<string, string> = {
+  not_allowed: "This Google account isn't allowed to use Builder. Ask an administrator to add your e-mail.",
+  google_failed: 'Google sign-in did not complete. Please try again.',
+}
+const error = ref<string | null>(typeof route.query.error === 'string' ? googleErrors[route.query.error] ?? null : null)
+
+const redirectTarget = () =>
+  typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/') ? route.query.redirect : '/'
+
+onMounted(async () => {
+  try {
+    const res = await fetch('/bff/providers', { credentials: 'same-origin' })
+    if (res.ok) googleEnabled.value = (await res.json()).google === true
+  } catch {
+    // password sign-in still works
+  }
+})
+
+function signInWithGoogle() {
+  window.location.href = '/bff/login/google?returnUrl=' + encodeURIComponent(redirectTarget())
+}
 
 function validate(s: typeof state): FormError[] {
   const errors: FormError[] = []
@@ -27,8 +50,7 @@ async function submit(_e: FormSubmitEvent<typeof state>) {
   try {
     await auth.login(state.userName.trim(), state.password)
     void useLiveStore().start()
-    const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/') ? route.query.redirect : '/'
-    await router.replace(redirect)
+    await router.replace(redirectTarget())
   } catch (e) {
     error.value = e instanceof ApiError && e.status === 401 ? 'Wrong user name or password.' : (e as Error).message
   } finally {
@@ -62,6 +84,12 @@ async function submit(_e: FormSubmitEvent<typeof state>) {
         <UAlert v-if="error" color="error" variant="subtle" icon="i-lucide-circle-alert" :title="error" />
         <UButton type="submit" block :loading="busy" label="Sign in" />
       </UForm>
+
+      <template v-if="googleEnabled">
+        <USeparator label="or" class="my-4" />
+        <UButton block color="neutral" variant="outline" icon="i-simple-icons-google" label="Sign in with Google"
+          @click="signInWithGoogle" />
+      </template>
     </UCard>
   </div>
 </template>

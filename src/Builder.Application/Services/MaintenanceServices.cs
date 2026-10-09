@@ -69,9 +69,22 @@ public sealed class AuthService(IAppDbContext db, IClock clock, IPasswordHasher 
     {
         var name = input.UserName.Trim().ToLowerInvariant();
         var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.UserName == name, ct);
-        return user is not null && hasher.Verify(user.PasswordHash, input.Password)
+        return user?.PasswordHash is { } hash && hasher.Verify(hash, input.Password)
             ? new UserDto(user.UserName, user.DisplayName, user.IsAdmin)
             : null;
+    }
+
+    /// <summary>
+    /// Sign-in through an external provider (Google). Only a verified e-mail that belongs to a predefined
+    /// user is accepted; everyone else gets null.
+    /// </summary>
+    public async Task<UserDto?> ExternalLoginAsync(ExternalLoginInput input, CancellationToken ct)
+    {
+        if (!input.EmailVerified) return null;
+        var email = User.NormalizeEmail(input.Email);
+        if (email is null) return null;
+        var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Email == email, ct);
+        return user is null ? null : new UserDto(user.UserName, user.DisplayName, user.IsAdmin);
     }
 
     /// <summary>Creates the bootstrap admin on first start.</summary>
@@ -79,6 +92,23 @@ public sealed class AuthService(IAppDbContext db, IClock clock, IPasswordHasher 
     {
         if (await db.Users.AnyAsync(ct)) return;
         db.Users.Add(new User(userName, "Administrator", hasher.Hash(password), true, clock.UtcNow));
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Makes sure every predefined external user exists (matched by e-mail) with the configured name and role.
+    /// Users are never removed here; take someone off the list and delete them separately.
+    /// </summary>
+    public async Task EnsureAllowedUsersAsync(IEnumerable<AllowedUser> allowed, CancellationToken ct)
+    {
+        foreach (var a in allowed)
+        {
+            var email = User.NormalizeEmail(a.Email);
+            if (email is null) continue;
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Email == email, ct);
+            if (user is null) db.Users.Add(User.External(email, a.DisplayName, a.IsAdmin, clock.UtcNow));
+            else user.UpdateProfile(a.DisplayName, a.IsAdmin);
+        }
         await db.SaveChangesAsync(ct);
     }
 }

@@ -158,6 +158,19 @@ public sealed class EndToEndTests(AspireFixture aspire) : IDisposable
         Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync("/api/agent/artifacts/" + Guid.NewGuid())).StatusCode);
     }
 
+    [Fact]
+    public async Task Google_sign_in_is_hidden_until_configured()
+    {
+        using var anonymous = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+        {
+            BaseAddress = aspire.App.GetEndpoint("bff", "http"),
+        };
+        var providers = await anonymous.GetFromJsonAsync<JsonNode>("/bff/providers");
+        Assert.True(providers!["password"]!.GetValue<bool>());
+        Assert.False(providers["google"]!.GetValue<bool>());
+        Assert.Equal(HttpStatusCode.NotFound, (await anonymous.GetAsync("/bff/login/google")).StatusCode);
+    }
+
     private Task<HttpClient> LoginAsync() => E2E.LoginAsync(aspire);
     private static Task<JsonNode> PostAsync(HttpClient http, string url, object body) => E2E.PostAsync(http, url, body);
     private static JsonNode Job(JsonNode build, string key) => E2E.Job(build, key);

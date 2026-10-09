@@ -6,6 +6,7 @@ using Builder.Api.Hubs;
 using Builder.Api.Workers;
 using Builder.Application;
 using Builder.Application.Abstractions;
+using Builder.Application.Dtos;
 using Builder.Application.Services;
 using Builder.Contracts;
 using Builder.Domain;
@@ -107,6 +108,8 @@ await using (var scope = app.Services.CreateAsyncScope())
         config["Auth:AdminUser"] ?? "admin",
         config["Auth:AdminPassword"] ?? throw new InvalidOperationException("Auth:AdminPassword is not configured."),
         CancellationToken.None);
+    await scope.ServiceProvider.GetRequiredService<AuthService>().EnsureAllowedUsersAsync(
+        config.GetSection("Auth:AllowedUsers").Get<List<AllowedUser>>() ?? [], CancellationToken.None);
 }
 
 app.Run();

@@ -90,3 +90,12 @@ public sealed record DashboardDto(
     List<DeploymentDto> ActiveDeployments, Last24hDto Last24h);
 
 public sealed record LoginInput(string UserName, string Password);
+public sealed record ExternalLoginInput(string Provider, string Email, bool EmailVerified, string? DisplayName);
+
+/// <summary>A user allowed to sign in with Google, from configuration (Auth:AllowedUsers).</summary>
+public sealed class AllowedUser
+{
+    public string Email { get; set; } = "";
+    public string? DisplayName { get; set; }
+    public bool IsAdmin { get; set; }
+}

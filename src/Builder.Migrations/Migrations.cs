@@ -8,3 +8,4 @@ namespace Builder.Migrations;
 #pragma warning disable SA1649, SA1402 // many tiny types in one file, on purpose
 
 [Migration(1, "initial_schema")] public sealed class M000001 : SqlFileMigration;
+[Migration(2, "user_email")] public sealed class M000002 : SqlFileMigration;

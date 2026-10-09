@@ -99,6 +99,27 @@ public sealed class DatabaseTests(AspireFixture aspire) : IAsyncLifetime
         Assert.Equal(1, await fresh.LogLines.CountAsync());
     }
 
+    [Fact]
+    public async Task Google_sign_in_only_accepts_verified_predefined_users()
+    {
+        using (var migrator = new DatabaseMigrator(_connectionString)) migrator.Up();
+        await using var db = Db();
+        var auth = new Builder.Application.Services.AuthService(db, new Builder.Infrastructure.Services.SystemClock(),
+            new Builder.Infrastructure.Services.Pbkdf2PasswordHasher());
+
+        await auth.EnsureAllowedUsersAsync([new() { Email = "Alice@Example.com", DisplayName = "Alice", IsAdmin = true }], default);
+        await auth.EnsureAllowedUsersAsync([new() { Email = "alice@example.com", DisplayName = "Alice A.", IsAdmin = false }], default);
+        Assert.Equal(1, await db.Users.CountAsync()); // idempotent, matched by e-mail
+
+        var ok = await auth.ExternalLoginAsync(new("google", "ALICE@example.com", true, "whatever"), default);
+        Assert.Equal(("alice@example.com", "Alice A.", false), (ok!.UserName, ok.DisplayName, ok.IsAdmin));
+
+        Assert.Null(await auth.ExternalLoginAsync(new("google", "alice@example.com", false, null), default)); // unverified
+        Assert.Null(await auth.ExternalLoginAsync(new("google", "mallory@example.com", true, null), default)); // not predefined
+        // a Google-only user has no password, so password sign-in never matches it
+        Assert.Null(await auth.ValidateAsync(new("alice@example.com", ""), default));
+    }
+
     private async Task<List<string>> TablesAsync()
     {
         await using var c = new NpgsqlConnection(_connectionString);

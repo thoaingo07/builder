@@ -99,6 +99,9 @@ public static class Endpoints
         app.MapPost("/internal/login", async (LoginInput input, AuthService s, CancellationToken ct) =>
                 await s.ValidateAsync(input, ct) is { } user ? Results.Ok(user) : Results.Unauthorized())
             .RequireAuthorization(AuthSchemes.ServicePolicy);
+        app.MapPost("/internal/external-login", async (ExternalLoginInput input, AuthService s, CancellationToken ct) =>
+                await s.ExternalLoginAsync(input, ct) is { } user ? Results.Ok(user) : Results.StatusCode(StatusCodes.Status403Forbidden))
+            .RequireAuthorization(AuthSchemes.ServicePolicy);
 
         // agents: artifact upload/download
         var agent = app.MapGroup("/api/agent").RequireAuthorization(AuthSchemes.AgentPolicy);

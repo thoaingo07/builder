@@ -42,6 +42,9 @@ services:
       Auth__AdminPassword: ${BUILDER_ADMIN_PASSWORD:?set BUILDER_ADMIN_PASSWORD in deploy/.env}
       Auth__Jwt__SigningKey: ${BUILDER_JWT_KEY:?set BUILDER_JWT_KEY (32+ chars) in deploy/.env}
       Agents__Token: ${BUILDER_AGENT_TOKEN}
+      # optional: the one person allowed to sign in with Google (add __1__, __2__ ... for more)
+      Auth__AllowedUsers__0__Email: ${BUILDER_ALLOWED_EMAIL:-}
+      Auth__AllowedUsers__0__IsAdmin: "true"
     volumes:
       - api-data:/data
     ports:
@@ -60,6 +63,10 @@ services:
     environment:
       Api__Url: http://api:19100
       Auth__Jwt__SigningKey: ${BUILDER_JWT_KEY}
+      # optional Google sign-in
+      Auth__Google__ClientId: ${BUILDER_GOOGLE_CLIENT_ID:-}
+      Auth__Google__ClientSecret: ${BUILDER_GOOGLE_CLIENT_SECRET:-}
+      Auth__PublicOrigin: ${BUILDER_PUBLIC_ORIGIN:-}
     volumes:
       - bff-data:/data
     ports:
