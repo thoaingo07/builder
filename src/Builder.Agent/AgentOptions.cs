@@ -11,6 +11,10 @@ public sealed class AgentOptions
     /// <summary>How many jobs may run at the same time.</summary>
     public int Capacity { get; set; } = 2;
     public string WorkDirectory { get; set; } = "work";
+    /// <summary>Keep a build's checkout after the build finishes (faster re-runs; source stays on disk). Default: delete.</summary>
+    public bool KeepWorkspaces { get; set; }
+    /// <summary>Share NuGet/npm package caches between jobs (packages only, never credentials).</summary>
+    public bool SharedPackageCaches { get; set; } = true;
     /// <summary>go-task executable.</summary>
     public string TaskBinary { get; set; } = "task";
 

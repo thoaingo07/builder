@@ -9,7 +9,8 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
     public async Task<JobResult> RunAsync(JobAssignment job, CancellationToken ct)
     {
         var workspace = new Workspace(options.WorkRoot, job.BuildId);
-        var deployer = job.Deploy is { } target ? new Deployer(target, Path.Combine(workspace.Temp, job.JobId.ToString("N")), options.WorkRoot) : null;
+        using var sandbox = JobSandbox.Create(workspace, job.JobId, options.WorkRoot, options.SharedPackageCaches);
+        var deployer = job.Deploy is { } target ? new Deployer(target, Path.Combine(sandbox.Root, "deploy"), options.WorkRoot) : null;
         await using var log = new JobLog(lines => server.SendLogAsync(job.JobId, lines),
             [job.Source.AuthorizationHeader, job.Deploy?.PrivateKey, job.Deploy?.AksClientSecret, job.Deploy?.Kubeconfig]);
         var secrets = new Dictionary<string, string>();
@@ -37,7 +38,8 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
                 await workspace.UnpackAsync(stream, taskDir, ct);
             }
 
-            var env = new Dictionary<string, string>(job.Env);
+            var env = new Dictionary<string, string>(sandbox.Environment);
+            foreach (var (k, v) in job.Env) env[k] = v;
             if (deployer is not null)
             {
                 await deployer.PrepareAsync(log, ct);
@@ -47,8 +49,7 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
             derivedTaskfile = workspace.PrepareTaskfile(job.TaskfilePath, job.TaskName, job.JobId);
             List<string> args = ["--dir", workspace.Source, "--taskfile", derivedTaskfile, "--yes", "--color=false", job.TaskName];
             args.AddRange(job.TaskVars.Select(kv => $"{kv.Key}={kv.Value}"));
-            // secrets: go-task vars ({{.NAME}}) and environment variables ($NAME)
-            args.AddRange(secrets.Select(kv => $"{kv.Key}={kv.Value}"));
+            // secrets only through the environment: go-task exposes them as {{.NAME}} too, and they never show up in `ps`
             foreach (var (k, v) in secrets) env[k] = v;
             env["NO_COLOR"] = "1";
 

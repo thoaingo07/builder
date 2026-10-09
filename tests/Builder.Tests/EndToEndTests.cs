@@ -223,6 +223,42 @@ public sealed class EndToEndTests(AspireFixture aspire) : IDisposable
     }
 
     [Fact]
+    public async Task Jobs_leave_nothing_behind_on_the_daemon()
+    {
+        var repo = CreateRepository(new()
+        {
+            [".builder/runners/clean.yml"] = """
+                version: '3'
+                tasks:
+                  default:
+                    x-secrets: [LEAK_CHECK]
+                    cmds:
+                      - mkdir -p "$DOCKER_CONFIG" && echo '{"auths":{"r.example":{"auth":"x"}}}' > "$DOCKER_CONFIG/config.json"
+                      - echo "SANDBOX=$HOME"
+                      - echo "CHECKOUT=$PWD"
+                      # the secret must not be on any process's command line (shell builtins only, so this check can't leak it)
+                      - |
+                        all=$(cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\0' ' ')
+                        case "$all" in *"$LEAK_CHECK"*) echo "LEAKED ON A COMMAND LINE"; exit 1;; esac
+                      - echo "home is sandboxed"; test "$HOME" != "$USER_HOME"
+                """,
+        });
+        using var http = await LoginAsync();
+        await PostAsync(http, "/api/secrets", new { name = "LEAK_CHECK", value = "only-in-env-" + Guid.NewGuid().ToString("N") });
+        var runner = await E2E.MapRunnerAsync(http, repo, ".builder/runners/clean.yml");
+        var build = await E2E.RunBuildAsync(http, runner);
+        var logs = await http.GetFromJsonAsync<JsonArray>($"/api/builds/{build["id"]}/jobs/{build["jobs"]![0]!["id"]}/logs");
+        var lines = logs!.Select(l => l!["text"]!.GetValue<string>()).ToList();
+        Assert.True(build["status"]!.GetValue<string>() == "Succeeded", string.Join("\n", lines));
+
+        var sandbox = lines.Single(l => l.StartsWith("SANDBOX=")).Split('=', 2)[1];
+        var checkout = lines.Single(l => l.StartsWith("CHECKOUT=")).Split('=', 2)[1];
+        Assert.Contains("/jobs/", sandbox);
+        Assert.False(Directory.Exists(sandbox), "the job sandbox (HOME, DOCKER_CONFIG, ...) is deleted when the job ends");
+        await WaitUntilAsync(() => Task.FromResult(!Directory.Exists(checkout)), "the checkout to be deleted after the build", 30);
+    }
+
+    [Fact]
     public async Task Cancel_stops_a_running_build()
     {
         var repo = CreateRepository(new() { [".builder/runners/slow.yml"] = "version: '3'\ntasks:\n  default:\n    cmds:\n      - sleep 120\n" });

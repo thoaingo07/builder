@@ -132,8 +132,10 @@ public sealed partial class GitCli(IOptions<BuilderStorageOptions> options) : IG
         psi.Environment["GCM_INTERACTIVE"] = "never";
         if (auth?.AuthorizationHeader is { } header)
         {
-            psi.ArgumentList.Add("-c");
-            psi.ArgumentList.Add($"http.extraHeader=Authorization: {header}");
+            // through the environment, never on the command line
+            psi.Environment["GIT_CONFIG_COUNT"] = "1";
+            psi.Environment["GIT_CONFIG_KEY_0"] = "http.extraHeader";
+            psi.Environment["GIT_CONFIG_VALUE_0"] = "Authorization: " + header;
         }
         foreach (var a in args) psi.ArgumentList.Add(a);
 

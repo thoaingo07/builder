@@ -132,6 +132,9 @@ public sealed class SignalRAgentGateway(IHubContext<AgentHub> hub, AgentConnecti
         return true;
     }
 
+    public Task ReleaseBuildAsync(Guid agentId, Guid buildId, CancellationToken ct) =>
+        connections.Get(agentId) is { } c ? hub.Clients.Client(c).SendAsync(AgentHubNames.ReleaseBuild, buildId, ct) : Task.CompletedTask;
+
     public async Task<bool> TeardownAsync(Guid agentId, TeardownRequest request, CancellationToken ct)
     {
         if (connections.Get(agentId) is not { } c) return false;

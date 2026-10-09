@@ -25,6 +25,8 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
         _options = options.Value;
         _log = log;
         Directory.CreateDirectory(_options.WorkRoot);
+        if (JobSandbox.SweepLeftovers(_options.WorkRoot) is > 0 and var swept)
+            log.LogInformation("Removed {Count} job sandbox folder(s) left by an earlier run", swept);
         _metrics = new SystemMetrics(_options.WorkRoot);
         _runner = new JobRunner(_options, httpFactory.CreateClient("server"), this, runnerLog);
 
@@ -43,6 +45,7 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
         });
         _hub.On<CleanupRequest>(AgentHubNames.Cleanup, request => _ = Task.Run(() => CleanupAsync(request)));
         _hub.On<TeardownRequest>(AgentHubNames.Teardown, request => _ = Task.Run(() => TeardownAsync(request)));
+        _hub.On<Guid>(AgentHubNames.ReleaseBuild, ReleaseBuild);
         _hub.Reconnected += async _ => await RegisterAsync(_stopping.Token);
     }
 
@@ -99,11 +102,31 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
     private static string PlatformLabel =>
         OperatingSystem.IsLinux() ? "linux" : OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "other";
 
+    private readonly ConcurrentDictionary<Guid, Guid> _jobBuilds = new();
+
+    /// <summary>The server says a build is over: remove its checkout (source code) from this machine.</summary>
+    private void ReleaseBuild(Guid buildId)
+    {
+        if (_options.KeepWorkspaces || _jobBuilds.Values.Contains(buildId)) return;
+        var dir = new Workspace(_options.WorkRoot, buildId).Root;
+        try
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+            Workspace.Release(buildId);
+            _log.LogInformation("Removed the workspace of build {Build}", buildId);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning("Could not remove the workspace of build {Build}: {Error}", buildId, ex.Message);
+        }
+    }
+
     private bool Accept(JobAssignment job)
     {
         if (_running.Count >= _options.Capacity) return false;
         var cts = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
         if (!_running.TryAdd(job.JobId, cts)) return false;
+        _jobBuilds[job.JobId] = job.BuildId;
         _log.LogInformation("Job {Task} ({Job}) of build #{Number}", job.TaskName, job.JobId, job.BuildNumber);
         _ = Task.Run(async () =>
         {
@@ -115,6 +138,7 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
             finally
             {
                 _running.TryRemove(job.JobId, out _);
+                _jobBuilds.TryRemove(job.JobId, out _);
                 cts.Dispose();
             }
             await ReportAsync(result);
@@ -192,9 +216,17 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
         TeardownResult result;
         try
         {
-            var deployer = new Deployer(request.Target, Path.Combine(_options.WorkRoot, "tmp", request.DeploymentId.ToString("N")), _options.WorkRoot);
-            var (ok, output) = await deployer.TeardownAsync(_stopping.Token);
-            result = new TeardownResult(request.DeploymentId, ok, output);
+            var temp = Path.Combine(_options.WorkRoot, "tmp", request.DeploymentId.ToString("N"));
+            try
+            {
+                var deployer = new Deployer(request.Target, temp, _options.WorkRoot);
+                var (ok, output) = await deployer.TeardownAsync(_stopping.Token);
+                result = new TeardownResult(request.DeploymentId, ok, output);
+            }
+            finally
+            {
+                if (Directory.Exists(temp)) Directory.Delete(temp, true); // key, kubeconfig, az login state
+            }
         }
         catch (Exception ex)
         {

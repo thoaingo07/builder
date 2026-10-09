@@ -44,7 +44,7 @@ public sealed class Workspace
             }
             log.System($"Checking out {source.Url} @ {source.Branch} ({Short(source.Commit)})");
             await Git(log, ct, null, "init", "--quiet");
-            var auth = source.AuthorizationHeader is { } h ? new[] { "-c", $"http.extraHeader=Authorization: {h}" } : [];
+            var auth = GitAuthEnvironment(source.AuthorizationHeader);
             var fetched = await Git(log, ct, auth, "fetch", "--quiet", "--depth", "1", source.Url, source.Commit) == 0;
             if (!fetched)
             {
@@ -108,9 +108,20 @@ public sealed class Workspace
         await TarFile.ExtractToDirectoryAsync(gz, baseDir, overwriteFiles: true, ct);
     }
 
-    private async Task<int> Git(JobLog log, CancellationToken ct, string[]? pre, params string[] args) =>
-        await ProcessRunner.RunAsync("git", [.. pre ?? [], .. args], Source, null,
+    private async Task<int> Git(JobLog log, CancellationToken ct, Dictionary<string, string>? env, params string[] args) =>
+        await ProcessRunner.RunAsync("git", args, Source, env,
             (stream, line) => log.Write(stream == LogStream.Err ? LogStream.System : stream, line), ct);
+
+    /// <summary>
+    /// The Authorization header as git config passed through the environment (GIT_CONFIG_COUNT/KEY/VALUE, git ≥ 2.31):
+    /// not in .git/config, not on the command line (`ps`), only readable by this user and root while git runs.
+    /// </summary>
+    public static Dictionary<string, string>? GitAuthEnvironment(string? authorizationHeader) => authorizationHeader is null ? null : new()
+    {
+        ["GIT_CONFIG_COUNT"] = "1",
+        ["GIT_CONFIG_KEY_0"] = "http.extraHeader",
+        ["GIT_CONFIG_VALUE_0"] = "Authorization: " + authorizationHeader,
+    };
 
     private static string Short(string sha) => sha.Length > 8 ? sha[..8] : sha;
 

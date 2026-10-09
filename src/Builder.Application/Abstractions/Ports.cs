@@ -89,6 +89,7 @@ public interface IAgentGateway
     Task CancelJobAsync(Guid agentId, Guid jobId, CancellationToken ct);
     Task<bool> CleanupAsync(Guid agentId, CleanupRequest request, CancellationToken ct);
     Task<bool> TeardownAsync(Guid agentId, TeardownRequest request, CancellationToken ct);
+    Task ReleaseBuildAsync(Guid agentId, Guid buildId, CancellationToken ct);
 }
 
 /// <summary>Live updates for the UI; organization-wide events only reach that organization's members.</summary>

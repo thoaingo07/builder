@@ -21,6 +21,8 @@ public static class AgentHubNames
     public const string CancelJob = nameof(CancelJob);
     public const string Cleanup = nameof(Cleanup);
     public const string Teardown = nameof(Teardown);
+    /// <summary>The build finished: delete its checkout unless the agent keeps workspaces.</summary>
+    public const string ReleaseBuild = nameof(ReleaseBuild);
 }
 
 public sealed record AgentHello(
