@@ -12,7 +12,7 @@ namespace Builder.Application.Services;
 /// docker logins for the registries the job declared (x-registries), and an Azure DevOps token for Azure Artifacts
 /// feeds (x-azure-artifacts). Nothing long-lived leaves the API for service-principal connections.
 /// </summary>
-public sealed class CredentialService(IAppDbContext db, GitRemotes remotes, IAcrTokens acr)
+public sealed class CredentialService(IAppDbContext db, GitRemotes remotes, IAcrTokens acr, ISecretProtector protector)
 {
     public async Task<JobCredentials> ForJobAsync(Guid agentId, Guid jobId, CancellationToken ct)
     {
@@ -50,9 +50,35 @@ public sealed class CredentialService(IAppDbContext db, GitRemotes remotes, IAcr
             expiries.Add(refresh.ExpiresOn);
         }
 
+        DeploySecrets? deploy = null;
+        if (job.Deploy is { } deploySpec)
+        {
+            var env = await db.Environments.AsNoTracking().IgnoreQueryFilters()
+                .FirstOrDefaultAsync(e => e.OrgId == build.OrgId && e.Name == deploySpec.Environment, ct)
+                ?? throw new DomainException($"Environment '{deploySpec.Environment}' no longer exists.");
+            deploy = Reveal(env);
+        }
+
         return new JobCredentials(git, registries.ToArray(), azureDevOps,
-            expiries.Where(e => e != DateTimeOffset.MaxValue).DefaultIfEmpty().Min() is var min && min != default ? min : null);
+            expiries.Where(e => e != DateTimeOffset.MaxValue).DefaultIfEmpty().Min() is var min && min != default ? min : null,
+            deploy);
     }
+
+    /// <summary>The environment's secrets for the agent asked to tear this deployment down, while it is doing so.</summary>
+    public async Task<DeploySecrets> ForTeardownAsync(Guid agentId, Guid deploymentId, CancellationToken ct)
+    {
+        var d = await db.Deployments.AsNoTracking().IgnoreQueryFilters().FirstOrDefaultAsync(x => x.Id == deploymentId, ct);
+        if (d is null || d.TeardownAgentId != agentId || d.Status != Domain.Deployments.DeploymentStatus.Destroying)
+            throw new ForbiddenException("This agent is not tearing that deployment down.");
+        var env = await db.Environments.AsNoTracking().IgnoreQueryFilters().FirstOrDefaultAsync(e => e.Id == d.EnvironmentId, ct)
+            ?? throw new DomainException("The environment of this deployment no longer exists.");
+        return Reveal(env);
+    }
+
+    private DeploySecrets Reveal(Domain.Deployments.DeployEnvironment e) => new(
+        Unprotect(e.PrivateKeyProtected), Unprotect(e.KubeconfigProtected), Unprotect(e.AksClientSecretProtected));
+
+    private string? Unprotect(string? value) => value is null ? null : protector.Unprotect(value);
 
     /// <summary>The Azure connection a registry login uses: the one named, or the organization's only Azure connection.</summary>
     public async Task<GitConnection> AzureConnectionAsync(Guid orgId, RegistrySpec spec, CancellationToken ct)

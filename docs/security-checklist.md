@@ -26,8 +26,9 @@ Living list of security decisions and open work. ✅ done · ⬜ open · ⚠️ 
 - ⚠️ PAT connections still hand the PAT to the daemon for the job (in memory + job env). Prefer service principals.
 - ⚠️ Log masking only covers values of ≥ 4 characters, and only exact matches (a task that base64-encodes or
   splits a secret can still print it).
-- ⬜ **Deploy credentials are still pushed in the job message** (`DeployTarget.PrivateKey`, `Kubeconfig`,
-  `AksClientSecret`) and in teardown requests. Move them into the per-job credential fetch like git/registries.
+- ✅ Deploy credentials (SSH key, kubeconfig, AKS client secret) are no longer pushed: the deploying agent gets
+  them with the job's credentials, the tearing-down agent via `GetTeardownCredentials` (only the agent asked, only
+  while the deployment is being destroyed). Job and teardown messages carry no credentials at all.
 - ⬜ AKS with a service principal runs `az login` on the daemon; mint the kubeconfig server-side instead
   (ARM `listClusterUserCredential`) so daemons need neither `az` nor the client secret.
 - ⬜ Rotate the Data Protection key ring and document backup of `data/keys` (losing it makes every stored

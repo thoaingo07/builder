@@ -93,6 +93,8 @@ public sealed class AgentHub(AgentService agents, SecretService secrets, Credent
     /// <summary>Short-lived git/registry/Azure DevOps credentials for a job this agent is running.</summary>
     public Task<JobCredentials> GetJobCredentials(Guid jobId) => credentials.ForJobAsync(AgentId, jobId, Context.ConnectionAborted);
 
+    public Task<DeploySecrets> GetTeardownCredentials(Guid deploymentId) => credentials.ForTeardownAsync(AgentId, deploymentId, Context.ConnectionAborted);
+
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         if (Context.Items.TryGetValue("agentId", out var id) && id is Guid agentId)

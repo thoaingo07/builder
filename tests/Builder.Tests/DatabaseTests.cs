@@ -199,7 +199,7 @@ public sealed class DatabaseTests(AspireFixture aspire) : IAsyncLifetime
 
         var entra = new FakeEntra();
         var remotes = new Builder.Application.Services.GitRemotes(db, protector, entra);
-        var credentials = new Builder.Application.Services.CredentialService(db, remotes, new FakeAcr());
+        var credentials = new Builder.Application.Services.CredentialService(db, remotes, new FakeAcr(), protector);
         var job = build.Jobs.Single();
         var agent = Guid.NewGuid();
         await Assert.ThrowsAsync<Builder.Application.ForbiddenException>(() => credentials.ForJobAsync(agent, job.Id, default));

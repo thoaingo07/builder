@@ -15,6 +15,7 @@ public static class AgentHubNames
     public const string CleanupCompleted = nameof(CleanupCompleted);
     public const string GetJobSecrets = nameof(GetJobSecrets);
     public const string GetJobCredentials = nameof(GetJobCredentials);
+    public const string GetTeardownCredentials = nameof(GetTeardownCredentials);
     public const string TeardownCompleted = nameof(TeardownCompleted);
 
     // server → agent
@@ -70,7 +71,11 @@ public sealed record JobCredentials(
     string? GitAuthorization,
     RegistryLogin[] Registries,
     string? AzureDevOpsToken,
-    DateTimeOffset? ExpiresAt);
+    DateTimeOffset? ExpiresAt,
+    DeploySecrets? Deploy = null);
+
+/// <summary>An environment's secrets, fetched by the agent that deploys to it (or tears it down), never pushed.</summary>
+public sealed record DeploySecrets(string? PrivateKey, string? Kubeconfig, string? AksClientSecret);
 
 public sealed record ArtifactRef(Guid ArtifactId, string Name, string DownloadPath);
 
@@ -83,12 +88,9 @@ public sealed record DeployTarget(
     string? Host,
     int Port,
     string? Username,
-    string? PrivateKey,
     // kubernetes
-    string? Kubeconfig,
     string? AksTenantId,
     string? AksClientId,
-    string? AksClientSecret,
     string? AksSubscriptionId,
     string? AksResourceGroup,
     string? AksClusterName,

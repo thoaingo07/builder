@@ -100,6 +100,8 @@ public sealed class Deployment : IOrgScoped
     public string? Output { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? UpdatedAt { get; private set; }
+    /// <summary>The agent asked to tear this deployment down (the only one allowed to fetch its credentials).</summary>
+    public Guid? TeardownAgentId { get; private set; }
 
     private Deployment() { }
 
@@ -134,10 +136,11 @@ public sealed class Deployment : IOrgScoped
         UpdatedAt = now;
     }
 
-    public void Destroying(DateTimeOffset now)
+    public void Destroying(Guid agentId, DateTimeOffset now)
     {
         if (Status == DeploymentStatus.Destroyed) throw new DomainException("Deployment is already destroyed.");
         Status = DeploymentStatus.Destroying;
+        TeardownAgentId = agentId;
         UpdatedAt = now;
     }
 

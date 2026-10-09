@@ -6,7 +6,7 @@ namespace Builder.Agent;
 /// Prepares credentials for a deploy target (exposed to the task's commands as DEPLOY_* / KUBECONFIG)
 /// and runs the built-in deploy and teardown actions.
 /// </summary>
-public sealed class Deployer(DeployTarget target, string tempDir, string workRoot)
+public sealed class Deployer(DeployTarget target, DeploySecrets secrets, string tempDir, string workRoot)
 {
     private string? _keyFile;
     private string? _kubeconfig;
@@ -27,7 +27,7 @@ public sealed class Deployer(DeployTarget target, string tempDir, string workRoo
             _env["DEPLOY_HOST"] = target.Host;
             _env["DEPLOY_PORT"] = target.Port.ToString();
             _env["DEPLOY_USER"] = target.Username ?? "root";
-            if (target.PrivateKey is { } key)
+            if (secrets.PrivateKey is { } key)
             {
                 _keyFile = Path.Combine(tempDir, $"id_{Guid.NewGuid():N}");
                 await File.WriteAllTextAsync(_keyFile, key.ReplaceLineEndings("\n").TrimEnd() + "\n", ct);
@@ -39,7 +39,7 @@ public sealed class Deployer(DeployTarget target, string tempDir, string workRoo
         }
 
         _kubeconfig = Path.Combine(tempDir, $"kubeconfig-{Guid.NewGuid():N}");
-        if (target.Kubeconfig is { } kubeconfig)
+        if (secrets.Kubeconfig is { } kubeconfig)
         {
             await File.WriteAllTextAsync(_kubeconfig, kubeconfig, ct);
         }
@@ -49,7 +49,7 @@ public sealed class Deployer(DeployTarget target, string tempDir, string workRoo
             var azEnv = new Dictionary<string, string> { ["AZURE_CONFIG_DIR"] = azDir };
             log.System($"az login (service principal) and get-credentials for AKS cluster {target.AksClusterName}");
             await ProcessRunner.CaptureAsync("az", ["login", "--service-principal", "-u", target.AksClientId ?? "",
-                "-p", target.AksClientSecret ?? "", "--tenant", target.AksTenantId ?? "", "--output", "none"], tempDir, azEnv, ct);
+                "-p", secrets.AksClientSecret ?? "", "--tenant", target.AksTenantId ?? "", "--output", "none"], tempDir, azEnv, ct);
             if (target.AksSubscriptionId is { } sub)
                 await ProcessRunner.CaptureAsync("az", ["account", "set", "--subscription", sub], tempDir, azEnv, ct);
             List<string> getCreds = ["aks", "get-credentials", "-g", target.AksResourceGroup ?? "", "-n", target.AksClusterName,
@@ -60,7 +60,7 @@ public sealed class Deployer(DeployTarget target, string tempDir, string workRoo
             {
                 await ProcessRunner.CaptureAsync("kubelogin", ["convert-kubeconfig", "-l", "spn", "--kubeconfig", _kubeconfig], tempDir, null, ct);
                 _env["AAD_SERVICE_PRINCIPAL_CLIENT_ID"] = target.AksClientId ?? "";
-                _env["AAD_SERVICE_PRINCIPAL_CLIENT_SECRET"] = target.AksClientSecret ?? "";
+                _env["AAD_SERVICE_PRINCIPAL_CLIENT_SECRET"] = secrets.AksClientSecret ?? "";
                 _env["AZURE_TENANT_ID"] = target.AksTenantId ?? "";
             }
         }
@@ -119,7 +119,7 @@ public sealed class Deployer(DeployTarget target, string tempDir, string workRoo
     public async Task<(bool Ok, string Output)> TeardownAsync(CancellationToken ct)
     {
         var lines = new List<string>();
-        var log = new JobLog(_ => Task.CompletedTask, [target.PrivateKey, target.AksClientSecret]);
+        var log = new JobLog(_ => Task.CompletedTask, [secrets.PrivateKey, secrets.AksClientSecret]);
         void Collect(LogStream _, string l) => lines.Add(l);
         int code;
         await PrepareAsync(log, ct);

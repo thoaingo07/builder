@@ -86,7 +86,7 @@ public sealed class DeploymentService(
             .FirstOrDefault(a => gateway.IsConnected(a.Id) && a.Serves(d.OrgId) && a.Matches(required))
             ?? throw new DomainException($"No online agent with labels [{string.Join(", ", required)}] can tear this deployment down.");
 
-        d.Destroying(clock.UtcNow);
+        d.Destroying(agent.Id, clock.UtcNow);
         await db.SaveChangesAsync(ct);
 
         var target = scheduler.ToTarget(env, new DeploySpec(env.Name, d.Compose, d.Name, d.Manifests, d.Name, d.Url), null)

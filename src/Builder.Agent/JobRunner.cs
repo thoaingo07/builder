@@ -10,9 +10,9 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
     {
         var workspace = new Workspace(options.WorkRoot, job.BuildId);
         using var sandbox = JobSandbox.Create(workspace, job.JobId, options.WorkRoot, options.SharedPackageCaches);
-        var deployer = job.Deploy is { } target ? new Deployer(target, Path.Combine(sandbox.Root, "deploy"), options.WorkRoot) : null;
+        Deployer? deployer = null;
         await using var log = new JobLog(lines => server.SendLogAsync(job.JobId, lines),
-            [job.Deploy?.PrivateKey, job.Deploy?.AksClientSecret, job.Deploy?.Kubeconfig]);
+            []);
         var secrets = new Dictionary<string, string>();
         string? derivedTaskfile = null;
         try
@@ -30,7 +30,10 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
             // short-lived credentials for this job only: git, registries, Azure DevOps (kept in memory, masked)
             var credentials = await server.GetJobCredentialsAsync(job.JobId);
             log.AddSecrets([credentials.GitAuthorization ?? "", credentials.AzureDevOpsToken ?? "",
-                .. credentials.Registries.Select(r => r.Password)]);
+                .. credentials.Registries.Select(r => r.Password),
+                credentials.Deploy?.PrivateKey ?? "", credentials.Deploy?.Kubeconfig ?? "", credentials.Deploy?.AksClientSecret ?? ""]);
+            if (job.Deploy is { } target)
+                deployer = new Deployer(target, credentials.Deploy ?? new DeploySecrets(null, null, null), Path.Combine(sandbox.Root, "deploy"), options.WorkRoot);
             if (credentials.ExpiresAt is { } expires)
                 log.System($"Credentials valid until {expires:u}");
 

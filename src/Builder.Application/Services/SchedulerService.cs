@@ -14,7 +14,6 @@ public sealed class SchedulerService(
     IClock clock,
     IAgentGateway gateway,
     IBuildLock buildLock,
-    ISecretProtector secrets,
     BuildEvents events,
     ILogger<SchedulerService> log)
 {
@@ -131,8 +130,8 @@ public sealed class SchedulerService(
 
     public DeployTarget ToTarget(DeployEnvironment e, DeploySpec spec, Build? build) => new(
         e.Type == EnvironmentType.Kubernetes ? DeployTargetType.Kubernetes : DeployTargetType.SshDocker,
-        e.Name, e.Host, e.Port, e.Username, Reveal(e.PrivateKeyProtected),
-        Reveal(e.KubeconfigProtected), e.AksTenantId, e.AksClientId, Reveal(e.AksClientSecretProtected),
+        e.Name, e.Host, e.Port, e.Username,
+        e.AksTenantId, e.AksClientId,
         e.AksSubscriptionId, e.AksResourceGroup, e.AksClusterName, e.AksAdmin,
         spec.Compose, DeploymentName(spec, build), spec.Manifests, DeploymentName(spec, build), spec.Url);
 
@@ -142,7 +141,6 @@ public sealed class SchedulerService(
     private static string Sanitize(string name) =>
         new string(name.ToLowerInvariant().Select(c => char.IsAsciiLetterOrDigit(c) || c == '-' ? c : '-').ToArray()).Trim('-');
 
-    private string? Reveal(string? protectedValue) => protectedValue is null ? null : secrets.Unprotect(protectedValue);
 
     private async Task RecordDeploymentAsync(Build build, BuildJob job, CancellationToken ct)
     {

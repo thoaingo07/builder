@@ -222,7 +222,8 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
             var temp = Path.Combine(_options.WorkRoot, "tmp", request.DeploymentId.ToString("N"));
             try
             {
-                var deployer = new Deployer(request.Target, temp, _options.WorkRoot);
+                var secrets = await _hub.InvokeAsync<DeploySecrets>(AgentHubNames.GetTeardownCredentials, request.DeploymentId);
+                var deployer = new Deployer(request.Target, secrets, temp, _options.WorkRoot);
                 var (ok, output) = await deployer.TeardownAsync(_stopping.Token);
                 result = new TeardownResult(request.DeploymentId, ok, output);
             }
