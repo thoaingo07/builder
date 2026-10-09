@@ -7,6 +7,8 @@ import { Document, isMap, isScalar, isSeq, parseDocument, YAMLMap, YAMLSeq, type
 
 export interface CmdModel { kind: 'cmd' | 'task' | 'other'; text: string }
 export interface ApprovalModel { message: string; approvers: string[] }
+/** x-registries entry: a registry host, optionally logged in through a named connection. */
+export interface RegistryModel { registry: string; connection: string }
 export interface DeployModel { environment: string; compose: string; project: string; manifests: string; namespace: string; url: string }
 
 export interface TaskModel {
@@ -22,6 +24,10 @@ export interface TaskModel {
   artifacts: string[]
   /** x-secrets: organization secret names passed to the task as vars + env */
   secrets: string[]
+  /** x-registries: container registries the job logs in to */
+  registries: RegistryModel[]
+  /** x-azure-artifacts: hand the job an Azure Artifacts token */
+  azureArtifacts: boolean
   approval: ApprovalModel | null
   deploy: DeployModel | null
 }
@@ -69,7 +75,7 @@ function keyOf(pair: Pair): string {
 function readTask(name: string, node: unknown): TaskModel {
   const t: TaskModel = {
     name, desc: '', deps: [], hasComplexDeps: false, cmds: [], simpleCmds: true,
-    labels: [], artifacts: [], secrets: [], approval: null, deploy: null,
+    labels: [], artifacts: [], secrets: [], registries: [], azureArtifacts: false, approval: null, deploy: null,
   }
   if (isSeq(node)) {
     t.cmds = node.items.map(readCmd)
@@ -92,6 +98,13 @@ function readTask(name: string, node: unknown): TaskModel {
     if (isMap(agent)) t.labels = stringList(agent.get('labels', true))
     t.artifacts = stringList(node.get('x-artifacts', true))
     t.secrets = stringList(node.get('x-secrets', true))
+    const regs = node.get('x-registries', true)
+    if (isSeq(regs)) {
+      t.registries = regs.items.map(r => isMap(r)
+        ? { registry: str(r.get('registry')), connection: str(r.get('connection')) }
+        : { registry: str(scalarValue(r)), connection: '' }).filter(r => r.registry)
+    }
+    t.azureArtifacts = scalarValue(node.get('x-azure-artifacts', true)) === true
 
     const approval = node.get('x-approval', true)
     if (isMap(approval)) t.approval = { message: str(approval.get('message')), approvers: stringList(approval.get('approvers', true)) }
@@ -218,6 +231,26 @@ export function setSecrets(doc: Document, task: string, secrets: string[]) {
   const clean = [...new Set(secrets.map(x => x.trim()).filter(Boolean))]
   if (clean.length) m.set('x-secrets', flowList(doc, clean))
   else m.delete('x-secrets')
+}
+
+/** Writes `x-registries` as `{ registry, connection }` maps (connection omitted when empty). */
+export function setRegistries(doc: Document, task: string, registries: RegistryModel[]) {
+  const m = ensureTaskMap(doc, task)
+  const clean = registries.map(r => ({ registry: r.registry.trim(), connection: r.connection.trim() })).filter(r => r.registry)
+  if (!clean.length) { m.delete('x-registries'); return }
+  const seq = new YAMLSeq()
+  for (const r of clean) {
+    const item = doc.createNode(r.connection ? { registry: r.registry, connection: r.connection } : { registry: r.registry }) as YAMLMap
+    item.flow = true
+    seq.add(item)
+  }
+  m.set('x-registries', seq)
+}
+
+export function setAzureArtifacts(doc: Document, task: string, enabled: boolean) {
+  const m = ensureTaskMap(doc, task)
+  if (enabled) m.set('x-azure-artifacts', true)
+  else m.delete('x-azure-artifacts')
 }
 
 export function setApproval(doc: Document, task: string, approval: ApprovalModel | null) {

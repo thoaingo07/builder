@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import type { Document } from 'yaml'
-import type { EnvironmentDto } from '@/api/types'
+import type { ConnectionDto, EnvironmentDto } from '@/api/types'
 import * as tf from '@/lib/taskfile'
 import { debounce } from '@/lib/collections'
 
-const props = defineProps<{ task: tf.TaskModel; taskNames: string[]; environments: EnvironmentDto[]; secretNames: string[]; isEntry: boolean }>()
+const props = defineProps<{
+  task: tf.TaskModel; taskNames: string[]; environments: EnvironmentDto[]; secretNames: string[]
+  connections: ConnectionDto[]; isEntry: boolean
+}>()
 const emit = defineEmits<{
   mutate: [fn: (doc: Document) => void]
   rename: [from: string, to: string]
@@ -16,6 +19,7 @@ const emit = defineEmits<{
 // Local copy so typing isn't interrupted by the YAML round-trip; re-synced when another task is selected.
 const s = reactive({
   name: '', desc: '', deps: [] as string[], cmds: [] as string[], labels: [] as string[], artifacts: [] as string[], secrets: [] as string[],
+  registries: [] as tf.RegistryModel[], azureArtifacts: false,
   approval: false, approvalMessage: '', approvers: [] as string[],
   deploy: false, deployModel: { environment: '', compose: '', project: '', manifests: '', namespace: '', url: '' } as tf.DeployModel,
 })
@@ -24,6 +28,7 @@ const nameError = ref<string | null>(null)
 function sync(t: tf.TaskModel) {
   Object.assign(s, {
     name: t.name, desc: t.desc, deps: [...t.deps], cmds: t.cmds.map(c => c.text), labels: [...t.labels], artifacts: [...t.artifacts], secrets: [...t.secrets],
+    registries: t.registries.map(r => ({ ...r })), azureArtifacts: t.azureArtifacts,
     approval: !!t.approval, approvalMessage: t.approval?.message ?? '', approvers: [...(t.approval?.approvers ?? [])],
     deploy: !!t.deploy, deployModel: { ...(t.deploy ?? { environment: '', compose: '', project: '', manifests: '', namespace: '', url: '' }) },
   })
@@ -46,6 +51,20 @@ const applyArtifacts = () => apply(d => tf.setArtifacts(d, name(), s.artifacts))
 const applySecrets = () => apply(d => tf.setSecrets(d, name(), s.secrets))
 // names referenced in the file but not defined in the organization still show (and get flagged)
 const secretItems = computed(() => [...new Set([...props.secretNames, ...s.secrets])].sort())
+const applyRegistries = debounce(() => apply(d => tf.setRegistries(d, name(), s.registries)), 300)
+const applyAzureArtifacts = () => apply(d => tf.setAzureArtifacts(d, name(), s.azureArtifacts))
+const NO_CONNECTION = '__none__'
+// registry logins go through Azure (ACR) or Azure DevOps connections
+const registryConnectionItems = computed(() => [
+  { label: 'No connection', value: NO_CONNECTION },
+  ...props.connections.filter(c => c.type === 'Azure').map(c => ({ label: `${c.name} · Azure`, value: c.name })),
+])
+function setRegistryConnection(i: number, v: string) {
+  s.registries[i].connection = v === NO_CONNECTION ? '' : v
+  applyRegistries()
+}
+function addRegistry() { s.registries.push({ registry: '', connection: '' }) }
+function removeRegistry(i: number) { s.registries.splice(i, 1); applyRegistries() }
 const unknownSecrets = computed(() => s.secrets.filter(x => !props.secretNames.includes(x)))
 const applyDeploy = debounce(() => apply(d => tf.setDeploy(d, name(), s.deploy ? s.deployModel : null)), 300)
 
@@ -137,6 +156,25 @@ function onDeployToggle(v: boolean) {
         <span class="text-warning">Not defined in this organization: {{ unknownSecrets.join(', ') }}</span>
       </template>
     </UFormField>
+
+    <UFormField label="Container registries" help="x-registries — the agent logs in before the commands run; tokens are minted per job through the connection.">
+      <div class="space-y-1.5">
+        <div v-for="(r, i) in s.registries" :key="i" class="flex items-center gap-1">
+          <UInput v-model="r.registry" size="sm" class="min-w-0 flex-1 font-mono" placeholder="contoso.azurecr.io" @update:model-value="applyRegistries" />
+          <USelect
+            :model-value="r.connection || NO_CONNECTION" :items="registryConnectionItems" size="sm" class="w-40"
+            @update:model-value="(v: string) => setRegistryConnection(i, v)"
+          />
+          <UButton icon="i-lucide-x" size="xs" color="neutral" variant="ghost" aria-label="Remove registry" @click="removeRegistry(i)" />
+        </div>
+        <UButton icon="i-lucide-plus" label="Add registry" size="xs" color="neutral" variant="outline" @click="addRegistry" />
+      </div>
+    </UFormField>
+
+    <USwitch
+      v-model="s.azureArtifacts" label="Azure Artifacts token" description="x-azure-artifacts — token in $VSS_NUGET_ACCESSTOKEN / $AZURE_DEVOPS_TOKEN."
+      @update:model-value="applyAzureArtifacts"
+    />
 
     <UFormField label="Artifacts" help="x-artifacts — globs uploaded after success and downloaded by dependents.">
       <UInputTags v-model="s.artifacts" class="w-full font-mono" placeholder="out/**" @update:model-value="applyArtifacts" />

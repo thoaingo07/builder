@@ -36,13 +36,17 @@ public sealed class EntraTokens(HttpClient http, IOptions<AzureOptions> options,
         if (!res.IsSuccessStatusCode)
         {
             var error = await res.Content.ReadFromJsonAsync<EntraError>(ct).ContinueWith(t => t.IsCompletedSuccessfully ? t.Result : null);
-            throw new ExternalServiceException($"Entra ID refused the service principal: {error?.ErrorDescription?.Split('\n')[0] ?? res.ReasonPhrase}");
+            throw new ExternalServiceException($"Entra ID refused the service principal: {Short(error?.ErrorDescription) ?? res.ReasonPhrase}");
         }
         var body = await res.Content.ReadFromJsonAsync<EntraToken>(ct) ?? throw new ExternalServiceException("Empty token response from Entra ID.");
         var token = new AccessToken(body.AccessToken, clock.UtcNow.AddSeconds(body.ExpiresIn));
         Cache[key] = token;
         return token;
     }
+
+    /// <summary>The first sentence(s) of an Entra error, without its trace/correlation ids and timestamp.</summary>
+    private static string? Short(string? description) =>
+        description?.Split('\n')[0].Split(" Trace ID:")[0].Trim();
 
     private sealed record EntraToken([property: JsonPropertyName("access_token")] string AccessToken, [property: JsonPropertyName("expires_in")] int ExpiresIn);
     private sealed record EntraError([property: JsonPropertyName("error_description")] string? ErrorDescription);

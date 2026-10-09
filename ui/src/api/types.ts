@@ -111,9 +111,18 @@ export interface DeploymentDto {
   status: DeploymentStatus; output: string | null; createdAt: IsoDate; updatedAt: IsoDate | null
 }
 
-export type ConnectionType = 'AzureDevOps' | 'Git'
-export interface ConnectionDto { id: Guid; name: string; type: ConnectionType; url: string; username: string | null; hasToken: boolean }
-export interface ConnectionInput { name: string; type: ConnectionType; url: string; username?: string | null; token?: string | null }
+/** Azure = Azure Resource Manager / container registries (always a service principal). */
+export type ConnectionType = 'AzureDevOps' | 'Git' | 'Azure'
+export type ConnectionAuthKind = 'Pat' | 'ServicePrincipal'
+export interface ConnectionDto {
+  id: Guid; name: string; type: ConnectionType; url: string; username: string | null; hasToken: boolean
+  authKind: ConnectionAuthKind; tenantId: string | null; clientId: string | null
+}
+/** `token` is the PAT, or the client secret for a service principal; write-only, omit to keep. */
+export interface ConnectionInput {
+  name: string; type: ConnectionType; url: string; username?: string | null; token?: string | null
+  authKind?: ConnectionAuthKind; tenantId?: string | null; clientId?: string | null
+}
 export interface ConnectionTestDto { ok: boolean; message: string }
 export interface RemoteRepositoryDto { project: string; name: string; url: string; defaultBranch: string | null }
 

@@ -4,7 +4,7 @@ import { onBeforeRouteLeave } from 'vue-router'
 import type { Document } from 'yaml'
 import type { TabsItem } from '@nuxt/ui'
 import { api, ApiError } from '@/api/client'
-import type { EnvironmentDto, PipelineDto, PlanPreviewDto } from '@/api/types'
+import type { ConnectionDto, EnvironmentDto, PipelineDto, PlanPreviewDto } from '@/api/types'
 import * as tf from '@/lib/taskfile'
 import { debounce } from '@/lib/collections'
 import { shortSha } from '@/lib/format'
@@ -22,6 +22,7 @@ const confirm = useConfirm()
 const pipeline = ref<PipelineDto | null>(null)
 const environments = ref<EnvironmentDto[]>([])
 const secretNames = ref<string[]>([])
+const connections = ref<ConnectionDto[]>([])
 const branch = ref('')
 const loadedBranch = ref('')
 const commit = ref<string | null>(null)
@@ -206,6 +207,7 @@ onMounted(async () => {
   }
   void api.environments.list().then(r => { environments.value = r }).catch(() => undefined)
   void api.secrets.list().then(r => { secretNames.value = r.map(x => x.name) }).catch(() => undefined)
+  void api.connections.list().then(r => { connections.value = r }).catch(() => undefined)
   await load(pipeline.value.defaultBranch)
 })
 onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
@@ -303,7 +305,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
           </div>
           <aside class="max-h-[60vh] w-full overflow-y-auto border-t border-default p-4 lg:max-h-none lg:w-96 lg:border-t-0 lg:border-l">
             <TaskForm
-              v-if="selectedTask" :task="selectedTask" :task-names="taskNames" :environments="environments" :secret-names="secretNames"
+              v-if="selectedTask" :task="selectedTask" :task-names="taskNames" :environments="environments" :secret-names="secretNames" :connections="connections"
               :is-entry="model.entry === selectedTask.name"
               @mutate="mutate" @rename="rename" @remove="removeTask" @set-entry="makeEntry"
             />
