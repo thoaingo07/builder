@@ -10,7 +10,7 @@ pipelines written as [go-task](https://taskfile.dev) Taskfiles.
 - Live UI: builds, logs, agent CPU / RAM / disk, cancel, re-run, clean up, visual Taskfile editor
 - Clean Architecture, PostgreSQL (raw SQL migrations via FluentMigrator), BFF in front of the SPA
 
-Docs: [design](docs/design.md) · [API](docs/api.md) · [migrations](db/README.md) · [sample pipeline](samples/Taskfile.yml) · [dev host on Podman](docs/ops/dev-host-podman.md)
+Docs: [design](docs/design.md) · [API](docs/api.md) · [migrations](db/README.md) · [sample pipeline](samples/Taskfile.yml) · [dev host on Podman](docs/ops/dev-host-podman.md) · [security checklist](docs/security-checklist.md)
 
 ## Run it
 
