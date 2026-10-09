@@ -33,6 +33,9 @@ podman compose -f deploy/compose.yml up -d --build      # or: docker compose …
 podman compose -f deploy/compose.yml up -d --scale agent=3
 ```
 
+With Podman, prefer `podman-compose` (tested with 1.0.6, rootless): `podman compose` hands off to the
+Docker Compose plugin when one is installed, which then talks to Docker instead of Podman.
+
 UI at http://localhost:19000. Agents run inside containers with git, go-task, ssh, kubectl and the docker CLI;
 point `CONTAINER_SOCKET` in `.env` at your Podman (`/run/user/1000/podman/podman.sock`) or Docker socket so
 pipeline steps can build images. Add `BUILDER_AGENT_INSTALL_AZ=true` for AKS deployments.

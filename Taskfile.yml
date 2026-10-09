@@ -6,7 +6,7 @@ x-builder:
 
 vars:
   COMPOSE:
-    sh: command -v podman >/dev/null && echo "podman compose" || echo "docker compose"
+    sh: command -v podman-compose >/dev/null && echo "podman-compose" || echo "docker compose"
   DB: 'Host=localhost;Port=15433;Database=builder;Username=builder;Password=builder'
 
 tasks:
