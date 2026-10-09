@@ -36,7 +36,7 @@ function withQuery(path: string, query?: Query) {
 
 /** Personal endpoints that must not carry X-Org. */
 function isPersonal(method: string, path: string) {
-  return path === '/api/me' || (method === 'POST' && path === '/api/orgs')
+  return path === '/api/me' || path === '/api/me/password' || (method === 'POST' && path === '/api/orgs')
 }
 
 
@@ -83,6 +83,7 @@ export const bff = {
 export const api = {
   me: () => get<MeDto>('/api/me'),
   createOrg: (name: string) => post<OrgCreatedDto>('/api/orgs', { name }),
+  changePassword: (currentPassword: string, newPassword: string) => post<void>('/api/me/password', { currentPassword, newPassword }),
 
   org: {
     rename: (name: string) => put<OrgDto>('/api/org', { name }),

@@ -304,6 +304,30 @@ public sealed class EndToEndTests(AspireFixture aspire) : IDisposable
     }
 
     [Fact]
+    public async Task Users_can_change_their_password()
+    {
+        using var http = await LoginAsync(withOrganization: false);
+        Assert.Equal(HttpStatusCode.Conflict, (await http.PostAsJsonAsync("/api/me/password", new { currentPassword = "wrong", newPassword = "a-long-new-password" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await http.PostAsJsonAsync("/api/me/password", new { currentPassword = E2E.AdminPassword, newPassword = "short" })).StatusCode);
+
+        const string NewPassword = "a-long-new-password-1";
+        Assert.Equal(HttpStatusCode.NoContent, (await http.PostAsJsonAsync("/api/me/password", new { currentPassword = E2E.AdminPassword, newPassword = NewPassword })).StatusCode);
+        try
+        {
+            using var fresh = new HttpClient(new HttpClientHandler { CookieContainer = new CookieContainer() }) { BaseAddress = aspire.App.GetEndpoint("bff", "http") };
+            fresh.DefaultRequestHeaders.Add("X-CSRF", "1");
+            Assert.Equal(HttpStatusCode.Unauthorized, (await fresh.PostAsJsonAsync("/bff/login", new { userName = "admin", password = E2E.AdminPassword })).StatusCode);
+            Assert.True((await fresh.PostAsJsonAsync("/bff/login", new { userName = "admin", password = NewPassword })).IsSuccessStatusCode);
+        }
+        finally
+        {
+            // the other tests sign in with the bootstrap password
+            var restored = await http.PostAsJsonAsync("/api/me/password", new { currentPassword = NewPassword, newPassword = E2E.AdminPassword });
+            Assert.Equal(HttpStatusCode.NoContent, restored.StatusCode);
+        }
+    }
+
+    [Fact]
     public async Task Google_sign_in_is_hidden_until_configured()
     {
         using var anonymous = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })

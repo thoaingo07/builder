@@ -121,6 +121,7 @@ public sealed record DashboardDto(
     List<DeploymentDto> ActiveDeployments, Last24hDto Last24h);
 
 public sealed record LoginInput(string UserName, string Password);
+public sealed record ChangePasswordInput(string CurrentPassword, string NewPassword);
 public sealed record ExternalLoginInput(string Provider, string Email, bool EmailVerified, string? DisplayName);
 
 /// <summary>A user allowed to sign in with Google, from configuration (Auth:AllowedUsers).</summary>

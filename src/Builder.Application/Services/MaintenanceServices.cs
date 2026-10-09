@@ -89,6 +89,28 @@ public sealed class AuthService(IAppDbContext db, IClock clock, IPasswordHasher 
         return user is null ? null : new UserDto(user.UserName, user.DisplayName, user.IsAdmin);
     }
 
+    public const int MinPasswordLength = 12;
+
+    /// <summary>Changes the caller's own password (users who only sign in with Google have none).</summary>
+    public async Task ChangePasswordAsync(string userName, ChangePasswordInput input, CancellationToken ct)
+    {
+        var user = await db.Users.FirstOrDefaultAsync(u => u.UserName == userName, ct) ?? throw new NotFoundException("User");
+        if (user.PasswordHash is null) throw new Domain.DomainException("This account signs in with Google; it has no password.");
+        if (!hasher.Verify(user.PasswordHash, input.CurrentPassword)) throw new Domain.DomainException("The current password is wrong.");
+        if (input.NewPassword.Length < MinPasswordLength)
+            throw new Domain.DomainException($"Use at least {MinPasswordLength} characters.");
+        if (input.NewPassword == input.CurrentPassword) throw new Domain.DomainException("The new password must be different.");
+        user.SetPasswordHash(hasher.Hash(input.NewPassword));
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>True while the bootstrap admin can still sign in with the given (default) password.</summary>
+    public async Task<bool> UsesPasswordAsync(string userName, string password, CancellationToken ct)
+    {
+        var hash = await db.Users.Where(u => u.UserName == userName).Select(u => u.PasswordHash).FirstOrDefaultAsync(ct);
+        return hash is not null && hasher.Verify(hash, password);
+    }
+
     /// <summary>Creates the bootstrap admin on first start.</summary>
     public async Task EnsureAdminAsync(string userName, string password, CancellationToken ct)
     {

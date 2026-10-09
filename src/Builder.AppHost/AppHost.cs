@@ -22,6 +22,8 @@ var dataRoot = builder.Configuration["Builder:DataDirectory"]
         : Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "../../data/aspire")));
 
 const string agentToken = "aspire-agent-token";
+// dev keeps the familiar admin/admin; the ephemeral test stack uses a password that passes the 12-character rule
+var adminPassword = ephemeral ? "test-admin-password" : "admin";
 const string jwtKey = "aspire-only-signing-key-0123456789abcdef0123";
 
 var postgres = builder.AddPostgres("postgres").WithImageTag("17-alpine");
@@ -46,7 +48,7 @@ var api = builder.AddProject<Projects.Builder_Api>("api")
     .WithEnvironment("Database__MigrateOnStartup", "false")
     .WithEnvironment("Storage__DataDirectory", Path.Combine(dataRoot, "api"))
     .WithEnvironment("Auth__AdminUser", "admin")
-    .WithEnvironment("Auth__AdminPassword", "admin")
+    .WithEnvironment("Auth__AdminPassword", adminPassword)
     .WithEnvironment("Auth__Jwt__SigningKey", jwtKey)
     .WithEnvironment("Agents__Token", agentToken);
 

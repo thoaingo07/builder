@@ -10,6 +10,9 @@ namespace Builder.Tests;
 /// <summary>Helpers for end-to-end tests that talk to the stack through the BFF, like the UI does.</summary>
 internal static class E2E
 {
+    /// <summary>The bootstrap admin password of the ephemeral test stack (see AppHost).</summary>
+    public const string AdminPassword = "test-admin-password";
+
     /// <summary>Signs in as admin and switches to a fresh organization (X-Org header), so tests never share data.</summary>
     public static async Task<HttpClient> LoginAsync(AspireFixture aspire, bool withOrganization = true)
     {
@@ -19,7 +22,7 @@ internal static class E2E
         };
         http.DefaultRequestHeaders.Add("X-CSRF", "1");
         await WaitUntilAsync(async () =>
-            (await http.PostAsJsonAsync("/bff/login", new { userName = "admin", password = "admin" })).IsSuccessStatusCode,
+            (await http.PostAsJsonAsync("/bff/login", new { userName = "admin", password = AdminPassword })).IsSuccessStatusCode,
             "login");
         if (withOrganization)
         {

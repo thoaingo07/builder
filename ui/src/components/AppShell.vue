@@ -6,11 +6,14 @@ import { useAuthStore } from '@/stores/auth'
 import { useLiveStore } from '@/stores/live'
 import { useOrgStore } from '@/stores/org'
 import OrgSwitcher from '@/components/org/OrgSwitcher.vue'
+import ChangePasswordModal from '@/components/ChangePasswordModal.vue'
 
 const auth = useAuthStore()
 const live = useLiveStore()
 const org = useOrgStore()
 const router = useRouter()
+const overlay = useOverlay()
+const changePassword = overlay.create(ChangePasswordModal)
 
 const nav = computed<NavigationMenuItem[][]>(() => [
   [
@@ -34,6 +37,7 @@ const nav = computed<NavigationMenuItem[][]>(() => [
 
 const userMenu = computed<DropdownMenuItem[][]>(() => [
   [{ type: 'label', label: auth.user?.displayName ?? '', description: auth.user?.userName }],
+  [{ label: 'Change password', icon: 'i-lucide-key-square', onSelect: () => changePassword.open() }],
   [{ label: 'Sign out', icon: 'i-lucide-log-out', onSelect: logout }],
 ])
 

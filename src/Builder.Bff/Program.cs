@@ -39,6 +39,8 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 // asks the API whether that verified e-mail belongs to a predefined user before issuing the real session.
 var googleClientId = config["Auth:Google:ClientId"];
 var googleEnabled = !string.IsNullOrWhiteSpace(googleClientId) && !string.IsNullOrWhiteSpace(config["Auth:Google:ClientSecret"]);
+// Auth:PasswordSignIn=false turns user name / password sign-in off (e.g. once Google sign-in works)
+var passwordEnabled = config.GetValue("Auth:PasswordSignIn", true);
 if (googleEnabled)
 {
     builder.Services.AddAuthentication()
@@ -134,6 +136,7 @@ app.Use(async (ctx, next) =>
 
 app.MapPost("/bff/login", async (LoginRequest input, HttpContext ctx, IHttpClientFactory http, CancellationToken ct) =>
 {
+    if (!passwordEnabled) return Results.Problem(title: "Password sign-in is turned off.", statusCode: 404);
     using var request = new HttpRequestMessage(HttpMethod.Post, "/internal/login") { Content = JsonContent.Create(input) };
     request.Headers.Authorization = new("Bearer", jwt.ForService());
     using var response = await http.CreateClient("api").SendAsync(request, ct);
@@ -145,7 +148,7 @@ app.MapPost("/bff/login", async (LoginRequest input, HttpContext ctx, IHttpClien
     return Results.Ok(user);
 });
 
-app.MapGet("/bff/providers", () => Results.Ok(new { password = true, google = googleEnabled }));
+app.MapGet("/bff/providers", () => Results.Ok(new { password = passwordEnabled, google = googleEnabled }));
 
 app.MapGet("/bff/login/google", (string? returnUrl) => googleEnabled
     ? Results.Challenge(new AuthenticationProperties { RedirectUri = "/bff/login/google/done?returnUrl=" + Uri.EscapeDataString(LocalUrl(returnUrl)) }, ["Google"])

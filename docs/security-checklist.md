@@ -55,8 +55,10 @@ Living list of security decisions and open work. ✅ done · ⬜ open · ⚠️ 
 - ✅ Organization isolation: EF global query filters + membership check per request; non-members get 404.
   Background work scopes by the build's organization explicitly.
 - ✅ Google sign-in only for Google-verified e-mails that belong to a predefined or invited user.
-- ⬜ **Change the bootstrap `admin`/`admin` password** before exposing an instance (dev default in
-  `appsettings.json`); add a change-password screen, or disable password sign-in once Google works.
+- ✅ Change-password screen (user menu; 12+ characters) and `Auth:PasswordSignIn=false` to turn password
+  sign-in off (BFF hides and refuses it, API refuses it) once Google sign-in works. The API logs a warning at
+  start while the bootstrap admin still has the default password.
+- ⬜ **Change the bootstrap `admin`/`admin` password** on every instance you expose (the tailnet dev instance too).
 - ⬜ Audit log (who ran/approved/canceled what, secret and member changes).
 - ⬜ Rate limiting on `/bff/login` and the agent hub.
 - ⬜ Session revocation when a member is removed (today the cookie stays valid up to 12 h, though API calls

@@ -18,6 +18,7 @@ declare module 'vue' {
     ApprovalBox: typeof import('./src/components/ApprovalBox.vue')['default']
     AppShell: typeof import('./src/components/AppShell.vue')['default']
     BuildsTable: typeof import('./src/components/BuildsTable.vue')['default']
+    ChangePasswordModal: typeof import('./src/components/ChangePasswordModal.vue')['default']
     CodeEditor: typeof import('./src/components/CodeEditor.vue')['default']
     ConfirmModal: typeof import('./src/components/ConfirmModal.vue')['default']
     CreateOrgModal: typeof import('./src/components/org/CreateOrgModal.vue')['default']

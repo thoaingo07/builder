@@ -13,6 +13,7 @@ const route = useRoute()
 const state = reactive({ userName: '', password: '' })
 const busy = ref(false)
 const googleEnabled = ref(false)
+const passwordEnabled = ref(true)
 
 // errors the BFF reports back after a Google round trip
 const googleErrors: Record<string, string> = {
@@ -27,7 +28,11 @@ const redirectTarget = () =>
 onMounted(async () => {
   try {
     const res = await fetch('/bff/providers', { credentials: 'same-origin' })
-    if (res.ok) googleEnabled.value = (await res.json()).google === true
+    if (res.ok) {
+      const providers = await res.json()
+      googleEnabled.value = providers.google === true
+      passwordEnabled.value = providers.password !== false
+    }
   } catch {
     // password sign-in still works
   }
@@ -74,7 +79,7 @@ async function submit(_e: FormSubmitEvent<typeof state>) {
         </div>
       </template>
 
-      <UForm :state="state" :validate="validate" class="space-y-4" @submit="submit">
+      <UForm v-if="passwordEnabled" :state="state" :validate="validate" class="space-y-4" @submit="submit">
         <UFormField label="User name" name="userName">
           <UInput v-model="state.userName" autocomplete="username" autofocus class="w-full" />
         </UFormField>
@@ -85,8 +90,9 @@ async function submit(_e: FormSubmitEvent<typeof state>) {
         <UButton type="submit" block :loading="busy" label="Sign in" />
       </UForm>
 
+      <UAlert v-if="!passwordEnabled && error" color="error" variant="subtle" icon="i-lucide-circle-alert" :title="error" class="mb-4" />
       <template v-if="googleEnabled">
-        <USeparator label="or" class="my-4" />
+        <USeparator v-if="passwordEnabled" label="or" class="my-4" />
         <UButton block color="neutral" variant="outline" icon="i-simple-icons-google" label="Sign in with Google"
           @click="signInWithGoogle" />
       </template>

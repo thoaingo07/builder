@@ -108,6 +108,10 @@ await using (var scope = app.Services.CreateAsyncScope())
         config["Auth:AdminUser"] ?? "admin",
         config["Auth:AdminPassword"] ?? throw new InvalidOperationException("Auth:AdminPassword is not configured."),
         CancellationToken.None);
+    var auth = scope.ServiceProvider.GetRequiredService<AuthService>();
+    var adminUser = config["Auth:AdminUser"] ?? "admin";
+    if (config.GetValue("Auth:PasswordSignIn", true) && await auth.UsesPasswordAsync(adminUser, "admin", CancellationToken.None))
+        app.Logger.LogWarning("The '{Admin}' account still has the default password 'admin'. Change it (user menu → Change password) or set Auth:PasswordSignIn=false.", adminUser);
     await scope.ServiceProvider.GetRequiredService<AuthService>().EnsureAllowedUsersAsync(
         config.GetSection("Auth:AllowedUsers").Get<List<AllowedUser>>() ?? [], CancellationToken.None);
 }

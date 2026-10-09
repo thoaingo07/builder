@@ -21,6 +21,11 @@ public static class Endpoints
         user.MapGet("/me", (ClaimsPrincipal u, OrganizationService s, CancellationToken ct) => s.MeAsync(u.UserName(), ct));
         user.MapPost("/orgs", (OrgInput input, ClaimsPrincipal u, OrganizationService s, CancellationToken ct) =>
             s.CreateAsync(u.UserName(), input, ct));
+        user.MapPost("/me/password", async (ChangePasswordInput input, ClaimsPrincipal u, AuthService s, CancellationToken ct) =>
+        {
+            await s.ChangePasswordAsync(u.UserName(), input, ct);
+            return Results.NoContent();
+        });
 
         // ---- everything below acts in the organization named by the X-Org header ----
         var api = user.MapGroup("").AddEndpointFilter(RequireOrganization);
@@ -150,8 +155,9 @@ public static class Endpoints
         api.MapPost("/cleanup", (CleanupInput input, CleanupService s, CancellationToken ct) => s.RunAsync(input, ct));
 
         // BFF-only: validates credentials and returns the user the BFF puts in its cookie.
-        app.MapPost("/internal/login", async (LoginInput input, AuthService s, CancellationToken ct) =>
-                await s.ValidateAsync(input, ct) is { } u ? Results.Ok(u) : Results.Unauthorized())
+        app.MapPost("/internal/login", async (LoginInput input, AuthService s, IConfiguration config, CancellationToken ct) =>
+                !config.GetValue("Auth:PasswordSignIn", true) ? Results.StatusCode(StatusCodes.Status403Forbidden)
+                : await s.ValidateAsync(input, ct) is { } u ? Results.Ok(u) : Results.Unauthorized())
             .RequireAuthorization(AuthSchemes.ServicePolicy);
         app.MapPost("/internal/external-login", async (ExternalLoginInput input, AuthService s, CancellationToken ct) =>
                 await s.ExternalLoginAsync(input, ct) is { } u ? Results.Ok(u) : Results.StatusCode(StatusCodes.Status403Forbidden))
