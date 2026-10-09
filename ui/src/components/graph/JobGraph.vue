@@ -13,7 +13,7 @@ const emit = defineEmits<{ select: [jobId: string] }>()
 
 const now = useNow()
 const W = 210
-const H = 58
+const H = 70
 const flowId = `job-graph-${Math.random().toString(36).slice(2)}`
 const { fitView, findNode, updateNode } = useVueFlow(flowId)
 const fit = () => { void fitView({ padding: 0.15, maxZoom: 1.1 }) }

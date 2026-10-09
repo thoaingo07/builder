@@ -4,6 +4,9 @@ import type { Document } from 'yaml'
 import type { ConnectionDto, EnvironmentDto } from '@/api/types'
 import * as tf from '@/lib/taskfile'
 import { debounce } from '@/lib/collections'
+import StepsEditor from './StepsEditor.vue'
+import KeyValueEditor from './KeyValueEditor.vue'
+import RequiresEditor from './RequiresEditor.vue'
 
 const props = defineProps<{
   task: tf.TaskModel; taskNames: string[]; environments: EnvironmentDto[]; secretNames: string[]
@@ -18,7 +21,8 @@ const emit = defineEmits<{
 
 // Local copy so typing isn't interrupted by the YAML round-trip; re-synced when another task is selected.
 const s = reactive({
-  name: '', desc: '', deps: [] as string[], cmds: [] as string[], labels: [] as string[], artifacts: [] as string[], secrets: [] as string[],
+  name: '', desc: '', deps: [] as string[], labels: [] as string[], artifacts: [] as string[], secrets: [] as string[],
+  vars: [] as tf.KeyValue[], env: [] as tf.KeyValue[], requires: [] as tf.RequiredVar[],
   registries: [] as tf.RegistryModel[], azureArtifacts: false,
   approval: false, approvalMessage: '', approvers: [] as string[],
   deploy: false, deployModel: { environment: '', compose: '', project: '', manifests: '', namespace: '', url: '' } as tf.DeployModel,
@@ -27,7 +31,8 @@ const nameError = ref<string | null>(null)
 
 function sync(t: tf.TaskModel) {
   Object.assign(s, {
-    name: t.name, desc: t.desc, deps: [...t.deps], cmds: t.cmds.map(c => c.text), labels: [...t.labels], artifacts: [...t.artifacts], secrets: [...t.secrets],
+    name: t.name, desc: t.desc, deps: [...t.deps], labels: [...t.labels], artifacts: [...t.artifacts], secrets: [...t.secrets],
+    vars: t.vars.map(v => ({ ...v })), env: t.env.map(v => ({ ...v })), requires: t.requires.map(r => ({ name: r.name, enum: [...r.enum] })),
     registries: t.registries.map(r => ({ ...r })), azureArtifacts: t.azureArtifacts,
     approval: !!t.approval, approvalMessage: t.approval?.message ?? '', approvers: [...(t.approval?.approvers ?? [])],
     deploy: !!t.deploy, deployModel: { ...(t.deploy ?? { environment: '', compose: '', project: '', manifests: '', namespace: '', url: '' }) },
@@ -43,7 +48,9 @@ const env = computed(() => props.environments.find(e => e.name === s.deployModel
 const name = () => props.task.name
 const apply = (fn: (doc: Document) => void) => emit('mutate', fn)
 const applyDesc = debounce(() => apply(d => tf.setDesc(d, name(), s.desc)), 300)
-const applyCmds = debounce(() => apply(d => tf.setCmds(d, name(), s.cmds)), 300)
+const applyVars = debounce(() => apply(d => tf.setKeyValues(d, name(), 'vars', s.vars)), 350)
+const applyEnv = debounce(() => apply(d => tf.setKeyValues(d, name(), 'env', s.env)), 350)
+const applyRequires = debounce(() => apply(d => tf.setRequires(d, name(), s.requires)), 350)
 const applyApproval = debounce(() => apply(d => tf.setApproval(d, name(), s.approval ? { message: s.approvalMessage, approvers: s.approvers } : null)), 300)
 const applyDeps = () => apply(d => tf.setDeps(d, name(), s.deps))
 const applyLabels = () => apply(d => tf.setLabels(d, name(), s.labels))
@@ -77,16 +84,7 @@ function commitName() {
   emit('rename', props.task.name, to)
 }
 
-function moveCmd(i: number, delta: number) {
-  const j = i + delta
-  if (j < 0 || j >= s.cmds.length) return
-  const next = [...s.cmds];
-  [next[i], next[j]] = [next[j], next[i]]
-  s.cmds = next
-  applyCmds()
-}
-function removeCmd(i: number) { s.cmds.splice(i, 1); applyCmds() }
-function addCmd() { s.cmds.push(''); }
+
 
 function onDeployToggle(v: boolean) {
   s.deploy = v
@@ -125,22 +123,20 @@ function onDeployToggle(v: boolean) {
       <template v-if="task.hasComplexDeps" #hint><span class="text-warning">Has deps with vars — edit in YAML</span></template>
     </UFormField>
 
-    <UFormField label="Commands" help="Run in order on one agent via go-task.">
-      <div v-if="task.simpleCmds" class="space-y-1.5">
-        <div v-for="(_c, i) in s.cmds" :key="i" class="flex items-center gap-1">
-          <UInput v-model="s.cmds[i]" class="flex-1 font-mono" size="sm" placeholder="shell command" @update:model-value="applyCmds" />
-          <UButton icon="i-lucide-chevron-up" size="xs" color="neutral" variant="ghost" :disabled="i === 0" aria-label="Move up" @click="moveCmd(i, -1)" />
-          <UButton icon="i-lucide-chevron-down" size="xs" color="neutral" variant="ghost" :disabled="i === s.cmds.length - 1" aria-label="Move down" @click="moveCmd(i, 1)" />
-          <UButton icon="i-lucide-x" size="xs" color="neutral" variant="ghost" aria-label="Remove command" @click="removeCmd(i)" />
-        </div>
-        <UButton icon="i-lucide-plus" label="Add command" size="xs" color="neutral" variant="outline" @click="addCmd" />
-      </div>
-      <div v-else class="space-y-1">
-        <div v-for="(c, i) in task.cmds" :key="i" class="truncate rounded bg-elevated px-2 py-1 font-mono text-xs">
-          <span v-if="c.kind === 'task'" class="text-primary">task: </span>{{ c.text }}
-        </div>
-        <p class="text-xs text-warning">Contains task calls or structured cmds — edit them in the YAML tab.</p>
-      </div>
+    <UFormField label="Steps" help="cmds — run in order on one agent; each one is a step in the build log.">
+      <StepsEditor :task-name="task.name" :steps="task.steps" :other-tasks="otherTasks" @mutate="fn => emit('mutate', fn)" />
+    </UFormField>
+
+    <UFormField label="Variables" help="vars — available to every step as {{.NAME}}.">
+      <KeyValueEditor v-model="s.vars" add-label="Add variable" @update:model-value="applyVars" />
+    </UFormField>
+
+    <UFormField label="Environment" help="env — exported to every step's shell.">
+      <KeyValueEditor v-model="s.env" add-label="Add env var" @update:model-value="applyEnv" />
+    </UFormField>
+
+    <UFormField label="Run inputs" help="requires.vars — the Run dialog asks for these; leave the value list empty to accept anything.">
+      <RequiresEditor v-model="s.requires" @update:model-value="applyRequires" />
     </UFormField>
 
     <UFormField label="Agent labels" help="x-agent.labels — the agent must have all of them.">

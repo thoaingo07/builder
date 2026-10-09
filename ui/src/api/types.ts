@@ -66,7 +66,22 @@ export interface JobDto {
   agentId: Guid | null; agentName: string | null; exitCode: number | null; error: string | null
   startedAt: IsoDate | null; finishedAt: IsoDate | null
   approval: ApprovalDto | null; deploy: DeploySpecDto | null
+  /** the task's cmds, in order, with live status */
+  steps: JobStepDto[]
 }
+export type StepKind = 'Command' | 'TaskCall' | 'Defer'
+export type StepStatus = 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Skipped'
+export interface JobStepDto {
+  index: number; kind: StepKind
+  /** first line of the command, "task: <name>", "for each: <cmd>", "defer: …" */
+  label: string
+  /** TaskCall: the vars passed to the called task */
+  vars: Record<string, string> | null
+  status: StepStatus; startedAt: IsoDate | null; finishedAt: IsoDate | null
+}
+/** a go-task `requires.vars` entry the Run dialog must ask for */
+export interface RunInputDto { name: string; enum: string[] | null; requiredBy: string[] }
+export interface RunInputsDto { branch: string; entryTask: string; inputs: RunInputDto[] }
 export interface ArtifactDto { id: Guid; jobId: Guid; name: string; sizeBytes: number; createdAt: IsoDate }
 
 export interface BuildDetailDto extends BuildSummaryDto {
@@ -74,7 +89,11 @@ export interface BuildDetailDto extends BuildSummaryDto {
 }
 
 export type LogStream = 'Out' | 'Err' | 'System'
-export interface LogLineDto { id: number; jobId: Guid; timestamp: IsoDate; stream: LogStream; text: string }
+export interface LogLineDto {
+  id: number; jobId: Guid; timestamp: IsoDate; stream: LogStream; text: string
+  /** index into JobDto.steps; null = setup before the first step */
+  step: number | null
+}
 
 export interface AgentMetricsDto {
   at: IsoDate; cpuPercent: number; cpuCount: number

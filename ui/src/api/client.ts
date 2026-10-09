@@ -2,7 +2,7 @@ import type {
   AgentDto, AgentMetricsDto, BuildDetailDto, BuildStatus, BuildSummaryDto, CleanupInput, CleanupResultDto,
   ConnectionDto, ConnectionInput, ConnectionTestDto, DashboardDto, DeploymentDto, EnvironmentDto, EnvironmentInput,
   Guid, JobDto, LogLineDto, MapRunnersInput, MeDto, MemberDto, OrgCreatedDto, OrgDto, OrgRole, PipelineDto,
-  PipelineInput, PlanPreviewDto, ProblemDetails, RemoteRepositoryDto, RepositoryDto, RepositoryInput,
+  PipelineInput, PlanPreviewDto, RunInputsDto, ProblemDetails, RemoteRepositoryDto, RepositoryDto, RepositoryInput,
   RunnerFilesDto, SecretDto, SecretInput, TaskfileDto, UserDto,
 } from './types'
 
@@ -107,6 +107,8 @@ export const api = {
       put<TaskfileDto>(`/api/pipelines/${id}/taskfile`, { branch, content, message }),
     plan: (content: string, entryTask?: string | null) =>
       post<PlanPreviewDto>('/api/pipelines/plan', { content, entryTask: entryTask || null }),
+    inputs: (id: Guid, branch?: string | null, entryTask?: string | null) =>
+      get<RunInputsDto>(`/api/pipelines/${id}/inputs`, { branch, entryTask }),
     run: (id: Guid, input: { branch?: string | null; entryTask?: string | null; variables?: Record<string, string> }) =>
       post<BuildSummaryDto>(`/api/pipelines/${id}/builds`, input),
   },

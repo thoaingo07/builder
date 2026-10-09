@@ -1,4 +1,4 @@
-import type { BuildStatus, DeploymentStatus, JobStatus } from '@/api/types'
+import type { BuildStatus, DeploymentStatus, JobStatus, JobStepDto, StepStatus } from '@/api/types'
 
 export function relativeTime(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return '—'
@@ -88,4 +88,23 @@ export const isBuildActive = (s: BuildStatus) => s === 'Planning' || s === 'Runn
 
 export function humanize(s: string) {
   return s.replace(/([a-z])([A-Z])/g, '$1 $2')
+}
+
+export function stepIcon(s: StepStatus): { name: string; spin: boolean; color: UiColor } {
+  switch (s) {
+    case 'Running': return { name: 'i-lucide-loader-circle', spin: true, color: 'info' }
+    case 'Succeeded': return { name: 'i-lucide-circle-check', spin: false, color: 'success' }
+    case 'Failed': return { name: 'i-lucide-circle-x', spin: false, color: 'error' }
+    case 'Skipped': return { name: 'i-lucide-circle-slash', spin: false, color: 'neutral' }
+    default: return { name: 'i-lucide-circle-dashed', spin: false, color: 'neutral' }
+  }
+}
+
+/** Steps progress for a job: finished = succeeded/failed/skipped. */
+export function stepProgress(steps: JobStepDto[] | undefined) {
+  const list = steps ?? []
+  const done = list.filter(s => s.status === 'Succeeded' || s.status === 'Failed' || s.status === 'Skipped').length
+  const running = list.find(s => s.status === 'Running') ?? null
+  const failed = list.find(s => s.status === 'Failed') ?? null
+  return { total: list.length, done, running, failed }
 }

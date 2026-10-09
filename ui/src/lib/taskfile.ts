@@ -1,4 +1,4 @@
-import { Document, isMap, isScalar, isSeq, parseDocument, YAMLMap, YAMLSeq, type Node, type Pair } from 'yaml'
+import { Document, isMap, isScalar, isSeq, parseDocument, Scalar, YAMLMap, YAMLSeq, type Node, type Pair } from 'yaml'
 
 /**
  * Read model + comment-preserving mutations for go-task Taskfiles with Builder's x- extensions.
@@ -6,6 +6,27 @@ import { Document, isMap, isScalar, isSeq, parseDocument, YAMLMap, YAMLSeq, type
  */
 
 export interface CmdModel { kind: 'cmd' | 'task' | 'other'; text: string }
+/** One entry of a task's `cmds`, as the step editor sees it. */
+export type StepKindModel = 'cmd' | 'task' | 'defer'
+export interface StepModel {
+  kind: StepKindModel
+  /** command text (cmd / defer) */
+  cmd: string
+  /** called task (kind = task) */
+  task: string
+  vars: KeyValue[]
+  silent: boolean
+  ignoreError: boolean
+  /** has keys the editor doesn't know (for:, platforms:, …) or non-scalar values: edit in YAML */
+  readonly: boolean
+  /** YAML text of the step, shown for read-only steps */
+  raw: string
+}
+/** `vars:` / `env:` entry; dynamic = a `sh:`/map value the form can't edit (kept as-is). */
+export interface KeyValue { key: string; value: string; dynamic?: boolean }
+/** go-task `requires.vars` entry */
+export interface RequiredVar { name: string; enum: string[] }
+
 export interface ApprovalModel { message: string; approvers: string[] }
 /** x-registries entry: a registry host, optionally logged in through a named connection. */
 export interface RegistryModel { registry: string; connection: string }
@@ -24,6 +45,10 @@ export interface TaskModel {
   artifacts: string[]
   /** x-secrets: organization secret names passed to the task as vars + env */
   secrets: string[]
+  steps: StepModel[]
+  vars: KeyValue[]
+  env: KeyValue[]
+  requires: RequiredVar[]
   /** x-registries: container registries the job logs in to */
   registries: RegistryModel[]
   /** x-azure-artifacts: hand the job an Azure Artifacts token */
@@ -39,7 +64,7 @@ export interface TaskfileModel {
 }
 
 export function parse(content: string): Document {
-  return parseDocument(content, { prettyErrors: true })
+  return parseDocument(content, { prettyErrors: true, keepSourceTokens: true })
 }
 
 /** Serialises without padding flow lists (`[a, b]`) or folding long commands. */
@@ -75,12 +100,16 @@ function keyOf(pair: Pair): string {
 function readTask(name: string, node: unknown): TaskModel {
   const t: TaskModel = {
     name, desc: '', deps: [], hasComplexDeps: false, cmds: [], simpleCmds: true,
-    labels: [], artifacts: [], secrets: [], registries: [], azureArtifacts: false, approval: null, deploy: null,
+    labels: [], artifacts: [], secrets: [], steps: [], vars: [], env: [], requires: [], registries: [], azureArtifacts: false, approval: null, deploy: null,
   }
   if (isSeq(node)) {
     t.cmds = node.items.map(readCmd)
+    t.steps = node.items.map(readStep)
   } else if (isScalar(node)) {
-    if (node.value !== null && node.value !== '') t.cmds = [{ kind: 'cmd', text: str(node.value) }]
+    if (node.value !== null && node.value !== '') {
+      t.cmds = [{ kind: 'cmd', text: str(node.value) }]
+      t.steps = [readStep(node)]
+    }
   } else if (isMap(node)) {
     t.desc = str(node.get('desc'))
     const deps = node.get('deps', true)
@@ -93,6 +122,15 @@ function readTask(name: string, node: unknown): TaskModel {
     const cmds = node.get('cmds', true)
     if (isSeq(cmds)) t.cmds = cmds.items.map(readCmd)
     else if (node.has('cmd')) t.cmds = [{ kind: 'cmd', text: str(node.get('cmd')) }]
+    t.steps = isSeq(cmds) ? cmds.items.map(readStep) : node.has('cmd') ? [readStep(node.get('cmd', true))] : []
+    t.vars = readKeyValues(node.get('vars', true))
+    t.env = readKeyValues(node.get('env', true))
+    const reqVars = node.getIn(['requires', 'vars'], true)
+    if (isSeq(reqVars)) {
+      t.requires = reqVars.items.map(r => isMap(r)
+        ? { name: str(r.get('name')), enum: stringList(r.get('enum', true)) }
+        : { name: str(scalarValue(r)), enum: [] }).filter(r => r.name)
+    }
 
     const agent = node.get('x-agent', true)
     if (isMap(agent)) t.labels = stringList(agent.get('labels', true))
@@ -130,6 +168,62 @@ function readCmd(n: unknown): CmdModel {
     return { kind: 'other', text: String(n).trim() }
   }
   return { kind: 'other', text: str(n) }
+}
+
+const STEP_KEYS: Record<StepKindModel, string[]> = {
+  cmd: ['cmd', 'silent', 'ignore_error'],
+  task: ['task', 'vars', 'silent', 'ignore_error'],
+  defer: ['defer'],
+}
+
+function blankStep(kind: StepKindModel): StepModel {
+  return { kind, cmd: '', task: '', vars: [], silent: false, ignoreError: false, readonly: false, raw: '' }
+}
+
+function readStep(n: unknown): StepModel {
+  const raw = n === null || n === undefined ? '' : String(n).trim()
+  if (isScalar(n)) return { ...blankStep('cmd'), cmd: str(n.value), raw }
+  if (!isMap(n)) return { ...blankStep('cmd'), readonly: true, raw }
+  const keys = n.items.map(p => keyOf(p as Pair))
+  const kind: StepKindModel | null = n.has('task') ? 'task' : n.has('defer') ? 'defer' : n.has('cmd') ? 'cmd' : null
+  if (!kind) return { ...blankStep('cmd'), readonly: true, raw }
+  const step: StepModel = {
+    ...blankStep(kind), raw,
+    silent: scalarValue(n.get('silent', true)) === true,
+    ignoreError: scalarValue(n.get('ignore_error', true)) === true,
+  }
+  let readonly = keys.some(k => !STEP_KEYS[kind].includes(k))
+  if (kind === 'cmd') {
+    const c = n.get('cmd', true)
+    if (isScalar(c)) step.cmd = str(c.value); else readonly = true
+  } else if (kind === 'defer') {
+    const d = n.get('defer', true)
+    if (isScalar(d)) step.cmd = str(d.value); else readonly = true   // `defer: { task: x }` → YAML only
+  } else {
+    step.task = str(n.get('task'))
+    const vars = readKeyValues(n.get('vars', true))
+    if (vars.some(v => v.dynamic)) readonly = true
+    step.vars = vars
+  }
+  step.readonly = readonly
+  return step
+}
+
+/** Scalar text as written (`1.0` stays `1.0`, not the number 1). */
+function scalarText(n: unknown): string {
+  if (!isScalar(n)) return str(n)
+  return typeof n.value === 'string' ? n.value : (n.source ?? str(n.value))
+}
+
+function readKeyValues(n: unknown): KeyValue[] {
+  if (!isMap(n)) return []
+  return n.items.map(p => {
+    const pair = p as Pair
+    const v = pair.value
+    if (isScalar(v) || v === null) return { key: keyOf(pair), value: scalarText(v) }
+    const sh = isMap(v) ? v.get('sh') : undefined
+    return { key: keyOf(pair), value: sh !== undefined ? `sh: ${str(sh)}` : String(v).trim(), dynamic: true }
+  })
 }
 
 export function read(doc: Document): TaskfileModel {
@@ -171,6 +265,100 @@ function deleteAndPrune(map: YAMLMap, path: string[]) {
     if (isMap(parent) && parent.items.length === 0) map.deleteIn(path.slice(0, i))
     else break
   }
+}
+
+/** The task's `cmds` sequence, converting a single `cmd:` into it. */
+function cmdsSeq(doc: Document, task: string): YAMLSeq {
+  const m = ensureTaskMap(doc, task)
+  const cmds = m.get('cmds', true)
+  if (isSeq(cmds)) return cmds
+  const seq = new YAMLSeq()
+  if (m.has('cmd')) { seq.add(m.get('cmd', true)); m.delete('cmd') }
+  m.set('cmds', seq)
+  return seq
+}
+
+function stepNode(doc: Document, s: StepModel): unknown {
+  if (s.kind === 'defer') return doc.createNode({ defer: s.cmd })
+  if (s.kind === 'task') {
+    const map = new YAMLMap()
+    map.set('task', s.task)
+    const vars = s.vars.filter(v => v.key.trim())
+    if (vars.length) {
+      const vm = doc.createNode(Object.fromEntries(vars.map(v => [v.key.trim(), v.value]))) as YAMLMap
+      vm.flow = vars.length <= 3
+      map.set('vars', vm)
+    }
+    if (s.silent) map.set('silent', true)
+    if (s.ignoreError) map.set('ignore_error', true)
+    return map
+  }
+  const text = s.cmd.includes('\n') ? (() => { const sc = doc.createNode(s.cmd) as Scalar; sc.type = 'BLOCK_LITERAL'; return sc })() : doc.createNode(s.cmd)
+  if (!s.silent && !s.ignoreError) return text
+  const map = new YAMLMap()
+  map.set('cmd', text)
+  if (s.silent) map.set('silent', true)
+  if (s.ignoreError) map.set('ignore_error', true)
+  return map
+}
+
+/** Replaces an editable step. Read-only steps are never passed here, so no unknown keys are lost. */
+export function setStep(doc: Document, task: string, index: number, step: StepModel) {
+  const seq = cmdsSeq(doc, task)
+  if (index < 0 || index >= seq.items.length) return
+  seq.items[index] = stepNode(doc, step) as never
+}
+
+export function addStep(doc: Document, task: string, kind: StepKindModel, taskName = '') {
+  const seq = cmdsSeq(doc, task)
+  const step = { ...blankStep(kind), cmd: kind === 'defer' ? 'echo cleanup' : kind === 'cmd' ? 'echo "step"' : '', task: taskName }
+  seq.add(stepNode(doc, step))
+}
+
+export function removeStep(doc: Document, task: string, index: number) {
+  const seq = cmdsSeq(doc, task)
+  seq.items.splice(index, 1)
+  if (!seq.items.length) ensureTaskMap(doc, task).delete('cmds')
+}
+
+/** Moves a step node as-is (keeps comments and unknown keys). */
+export function moveStep(doc: Document, task: string, from: number, to: number) {
+  const seq = cmdsSeq(doc, task)
+  if (to < 0 || to >= seq.items.length || from === to) return
+  const [item] = seq.items.splice(from, 1)
+  seq.items.splice(to, 0, item)
+}
+
+/** Writes `vars:` / `env:`; dynamic (`sh:`) values are kept as their original nodes. */
+export function setKeyValues(doc: Document, task: string, field: 'vars' | 'env', entries: KeyValue[]) {
+  const m = ensureTaskMap(doc, task)
+  const old = m.get(field, true)
+  const clean = entries.filter(e => e.key.trim())
+  if (!clean.length) { m.delete(field); return }
+  const map = new YAMLMap()
+  for (const e of clean) {
+    const prev = isMap(old) ? old.get(e.key, true) : undefined
+    // keep the original node when it is dynamic or unchanged (formatting, comments, `1.0` stay as written)
+    const keep = prev !== undefined && (e.dynamic || (isScalar(prev) && scalarText(prev) === e.value))
+    map.set(e.key.trim(), keep ? prev : doc.createNode(e.value))
+  }
+  m.set(field, map)
+}
+
+/** Writes `requires.vars`: a plain name, or `{ name, enum }` when values are restricted. */
+export function setRequires(doc: Document, task: string, vars: RequiredVar[]) {
+  const m = ensureTaskMap(doc, task)
+  const clean = vars.map(v => ({ name: v.name.trim(), enum: v.enum.map(e => e.trim()).filter(Boolean) })).filter(v => v.name)
+  if (!clean.length) { deleteAndPrune(m, ['requires', 'vars']); return }
+  if (!isMap(m.get('requires', true))) m.set('requires', new YAMLMap())
+  const seq = new YAMLSeq()
+  for (const v of clean) {
+    if (!v.enum.length) { seq.add(doc.createNode(v.name)); continue }
+    const item = doc.createNode({ name: v.name, enum: v.enum }) as YAMLMap
+    item.flow = true
+    seq.add(item)
+  }
+  m.setIn(['requires', 'vars'], seq)
 }
 
 export function setDesc(doc: Document, task: string, desc: string) {

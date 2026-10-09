@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { ArtifactDto, JobDto } from '@/api/types'
 import { api } from '@/api/client'
-import { bytes, dateTime, duration } from '@/lib/format'
+import { bytes, dateTime, duration, stepProgress } from '@/lib/format'
 import { useNow } from '@/composables/useNow'
 import StatusBadge from './StatusBadge.vue'
 import ApprovalBox from './ApprovalBox.vue'
 import LogViewer from './LogViewer.vue'
+import StepTimeline from './StepTimeline.vue'
 
 const props = defineProps<{ buildId: string; job: JobDto; artifacts: ArtifactDto[] }>()
 const emit = defineEmits<{ jobUpdated: [JobDto]; selectKey: [string] }>()
@@ -14,6 +15,11 @@ const emit = defineEmits<{ jobUpdated: [JobDto]; selectKey: [string] }>()
 const now = useNow()
 const active = computed(() => ['Assigned', 'Running'].includes(props.job.status))
 const hasLog = computed(() => !!props.job.startedAt || active.value || !!props.job.agentName)
+const steps = computed(() => props.job.steps ?? [])
+const progress = computed(() => stepProgress(steps.value))
+/** step picked in the timeline; the log viewer reveals it */
+const focusStep = ref<number | null>(null)
+watch(() => props.job.id, () => { focusStep.value = null })
 const myArtifacts = computed(() => props.artifacts.filter(a => a.jobId === props.job.id))
 
 const facts = computed(() => [
@@ -83,8 +89,20 @@ const facts = computed(() => [
       </div>
     </div>
 
+    <div v-if="steps.length" class="space-y-1">
+      <div class="flex items-center gap-2 text-xs font-medium text-muted">
+        Steps <span class="tabular-nums">{{ progress.done }}/{{ progress.total }}</span>
+        <span class="flex-1" />
+        <UButton v-if="focusStep !== null" label="Show all" size="xs" color="neutral" variant="link" @click="focusStep = null" />
+      </div>
+      <StepTimeline :steps="steps" :now="now" :selected="focusStep" @select="i => (focusStep = i)" />
+    </div>
+
     <div v-if="hasLog" class="min-h-80 flex-1">
-      <LogViewer :build-id="buildId" :job-id="job.id" :active="active" />
+      <LogViewer
+        :build-id="buildId" :job-id="job.id" :active="active" :steps="steps"
+        :job-failed="job.status === 'Failed'" :focus-step="focusStep"
+      />
     </div>
     <UEmpty
       v-else-if="!job.approval" icon="i-lucide-clock" title="Not started"
