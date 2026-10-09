@@ -72,12 +72,17 @@ builder.Services.AddReverseProxy()
         [
             new() { RouteId = "api", ClusterId = "api", AuthorizationPolicy = "default", Match = new() { Path = "/api/{**rest}" } },
             new() { RouteId = "hub", ClusterId = "api", AuthorizationPolicy = "default", Match = new() { Path = "/hubs/ui/{**rest}" } },
+            // daemons reach the API through the same public endpoint; they authenticate with their agent token at the API
+            new() { RouteId = "agent-hub", ClusterId = "api", AuthorizationPolicy = "anonymous", Match = new() { Path = "/hubs/agent/{**rest}" } },
+            new() { RouteId = "agent-api", ClusterId = "api", AuthorizationPolicy = "anonymous", Match = new() { Path = "/api/agent/{**rest}" } },
         ],
         [new() { ClusterId = "api", Destinations = new Dictionary<string, Yarp.ReverseProxy.Configuration.DestinationConfig> { ["api"] = new() { Address = apiUrl } } }])
     .AddTransforms(t => t.AddRequestTransform(ctx =>
     {
         ctx.ProxyRequest.Headers.Remove("Cookie");
-        ctx.ProxyRequest.Headers.Authorization = new("Bearer", jwt.ForUser(ctx.HttpContext.User));
+        // user routes: swap the session cookie for a short-lived JWT; agent routes pass X-Agent-Token through untouched
+        if (!t.Route.RouteId.StartsWith("agent-", StringComparison.Ordinal))
+            ctx.ProxyRequest.Headers.Authorization = new("Bearer", jwt.ForUser(ctx.HttpContext.User));
         return ValueTask.CompletedTask;
     }));
 
@@ -108,12 +113,13 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 // CSRF: a cross-site form can't add custom headers, so every proxied API call must carry X-CSRF.
-// Agent endpoints are never reachable through the BFF.
 app.Use(async (ctx, next) =>
 {
-    if (ctx.Request.Path.StartsWithSegments("/api/agent"))
+    // agents are not browsers: no cookie, no CSRF header (their token is checked by the API)
+    if (ctx.Request.Path.StartsWithSegments("/api/agent") || ctx.Request.Path.StartsWithSegments("/hubs/agent"))
     {
-        ctx.Response.StatusCode = 404;
+        ctx.Request.Headers.Remove("Cookie");
+        await next();
         return;
     }
     if ((ctx.Request.Path.StartsWithSegments("/api") || ctx.Request.Path.StartsWithSegments("/bff"))

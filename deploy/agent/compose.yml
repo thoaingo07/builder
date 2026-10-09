@@ -1,0 +1,29 @@
+# A Builder daemon on one of your servers. It dials out to the cloud (no inbound ports) and runs the jobs of
+# your organization: fetch the repository, run the steps, fetch secrets at run time, deploy, clean up.
+#
+#   BUILDER_URL=https://builder.example.com BUILDER_AGENT_TOKEN=bldr_... podman-compose -f deploy/agent/compose.yml up -d
+#
+# The token comes from Organization settings → Agents → "Regenerate agent token" (shown once).
+name: builder-agent
+services:
+  agent:
+    image: ${BUILDER_AGENT_IMAGE:-localhost/builder-agent:latest}
+    build:
+      context: ../..
+      dockerfile: deploy/containers/agent.Containerfile
+    environment:
+      Agent__ServerUrl: ${BUILDER_URL:?set BUILDER_URL to the public Builder URL}
+      Agent__Token: ${BUILDER_AGENT_TOKEN:?set BUILDER_AGENT_TOKEN to your organization agent token}
+      Agent__Name: ${BUILDER_AGENT_NAME:-}
+      Agent__Capacity: ${BUILDER_AGENT_CAPACITY:-2}
+      Agent__Labels__0: ${BUILDER_AGENT_LABEL:-linux}
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - work:/work
+      # lets pipeline steps build/run containers on this server: Podman or Docker socket
+      - ${CONTAINER_SOCKET:-/run/user/1000/podman/podman.sock}:/var/run/docker.sock
+    security_opt:
+      - label=disable
+    restart: unless-stopped
+volumes:
+  work:

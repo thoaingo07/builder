@@ -248,7 +248,23 @@ public sealed class EndToEndTests(AspireFixture aspire) : IDisposable
         http.DefaultRequestHeaders.Remove("X-CSRF");
         var response = await http.PostAsJsonAsync("/api/orgs", new { name = "x" });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync("/api/agent/artifacts/" + Guid.NewGuid())).StatusCode);
+        // agent endpoints pass through the BFF but need an agent token, never a browser session
+        Assert.Equal(HttpStatusCode.Unauthorized, (await http.GetAsync("/api/agent/artifacts/" + Guid.NewGuid())).StatusCode);
+    }
+
+    [Fact]
+    public async Task Daemons_can_reach_the_api_through_the_public_endpoint()
+    {
+        using var http = await LoginAsync();
+        var token = (await PostAsync(http, "/api/org/agent-token", new { }))["agentToken"]!.GetValue<string>();
+        using var agent = new HttpClient { BaseAddress = aspire.App.GetEndpoint("bff", "http") };
+        agent.DefaultRequestHeaders.Add("X-Agent-Token", token);
+        Assert.Equal(HttpStatusCode.NotFound, (await agent.GetAsync("/api/agent/artifacts/" + Guid.NewGuid())).StatusCode); // authenticated, no such artifact
+        var negotiate = await agent.PostAsync("/hubs/agent/negotiate?negotiateVersion=1", null);
+        Assert.Equal(HttpStatusCode.OK, negotiate.StatusCode);
+        agent.DefaultRequestHeaders.Remove("X-Agent-Token");
+        agent.DefaultRequestHeaders.Add("X-Agent-Token", "bldr_wrong");
+        Assert.Equal(HttpStatusCode.Unauthorized, (await agent.PostAsync("/hubs/agent/negotiate?negotiateVersion=1", null)).StatusCode);
     }
 
     [Fact]

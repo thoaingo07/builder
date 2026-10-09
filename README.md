@@ -40,8 +40,9 @@ UI at http://localhost:19000. Agents run inside containers with git, go-task, ss
 point `CONTAINER_SOCKET` in `.env` at your Podman (`/run/user/1000/podman/podman.sock`) or Docker socket so
 pipeline steps can build images. Add `BUILDER_AGENT_INSTALL_AZ=true` for AKS deployments.
 
-Agents on other machines: run the agent image (or `dotnet Builder.Agent.dll`) with
-`Agent__ServerUrl=http://<server>:19100` and `Agent__Token=<BUILDER_AGENT_TOKEN>`.
+Daemons on your servers (the cloud setup): create an organization, copy its agent token (Organization settings),
+then on each server `BUILDER_URL=https://<your builder> BUILDER_AGENT_TOKEN=bldr_… podman-compose -f
+deploy/agent/compose.yml up -d`. Daemons dial out over HTTPS through the same public endpoint as the UI.
 
 ### 3. Processes by hand
 
