@@ -28,7 +28,10 @@ public static class DependencyInjection
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<ISecretProtector, DataProtectionSecretProtector>();
         services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
-        services.AddSingleton<IGitService, GitCli>();
+        services.AddSingleton<GitCli>();
+        services.AddHttpClient<AzureDevOpsGit>(c => c.Timeout = TimeSpan.FromSeconds(30))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false }); // sign-in redirect = bad PAT
+        services.AddTransient<IGitService, GitRouter>();
         services.AddSingleton<ITaskfilePlanner, TaskfilePlanner>();
         services.AddSingleton<IArtifactStore, FileArtifactStore>();
         services.AddSingleton<IAgentMetricsStore, InMemoryAgentMetricsStore>();
