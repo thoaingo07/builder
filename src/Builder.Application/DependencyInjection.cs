@@ -10,6 +10,7 @@ public static class DependencyInjection
         .AddScoped<ICurrentOrg, CurrentOrg>()
         .AddScoped<OrganizationService>()
         .AddScoped<RepositoryService>()
+        .AddScoped<SecretService>()
         .AddScoped<GitRemotes>()
         .AddScoped<BuildEvents>()
         .AddScoped<BuildService>()

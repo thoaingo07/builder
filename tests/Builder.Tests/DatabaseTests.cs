@@ -124,6 +124,40 @@ public sealed class DatabaseTests(AspireFixture aspire) : IAsyncLifetime
         Assert.Null(await auth.ValidateAsync(new("alice@example.com", ""), default));
     }
 
+    [Fact]
+    public async Task Only_the_agent_running_a_job_can_read_its_secrets()
+    {
+        using (var migrator = new DatabaseMigrator(_connectionString)) migrator.Up();
+        await using var db = Db();
+        var protector = new Builder.Infrastructure.Services.DataProtectionSecretProtector(
+            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create("tests"));
+        var org = new Builder.Domain.Organizations.Organization("Acme", "admin", Now);
+        var repo = new Builder.Domain.Repositories.Repository(org.Id, null, null, "/tmp/x.git", "main", Now);
+        var runner = new Pipeline(repo, "ci", ".builder/runners/ci.yml", null, Now);
+        var build = Build.Queue(org.Id, runner.Id, 1, "main", null, null, "admin", Now);
+        db.AddRange(org, repo, runner, build,
+            new Builder.Domain.Secrets.Secret(org.Id, "TOKEN", protector.Protect("v4lue"), null, "admin", Now),
+            new Builder.Domain.Secrets.Secret(org.Id, "OTHER", protector.Protect("n0t-yours"), null, "admin", Now));
+        await db.SaveChangesAsync();
+        build.Planned("abc", "ci", [new BuildJob("ci", "ci", null, 0, [], null, null, null, true, null, null, ["TOKEN"])], Now);
+        await db.SaveChangesAsync();
+
+        var secrets = new Builder.Application.Services.SecretService(db, new Builder.Infrastructure.Services.SystemClock(),
+            new Builder.Application.Abstractions.CurrentOrg(), protector);
+        var job = build.Jobs.Single();
+        var agentA = Guid.NewGuid();
+        await Assert.ThrowsAsync<Builder.Application.ForbiddenException>(() => secrets.ForJobAsync(agentA, job.Id, default)); // not assigned yet
+
+        job.AssignTo(agentA, "agent-a");
+        await db.SaveChangesAsync();
+        Assert.Equal(new Dictionary<string, string> { ["TOKEN"] = "v4lue" }, await secrets.ForJobAsync(agentA, job.Id, default)); // only declared ones
+        await Assert.ThrowsAsync<Builder.Application.ForbiddenException>(() => secrets.ForJobAsync(Guid.NewGuid(), job.Id, default)); // another agent
+
+        build.JobCompleted(job.Id, true, false, 0, null, Now);
+        await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<Builder.Application.ForbiddenException>(() => secrets.ForJobAsync(agentA, job.Id, default)); // job finished
+    }
+
     private async Task<List<string>> TablesAsync()
     {
         await using var c = new NpgsqlConnection(_connectionString);

@@ -39,6 +39,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ICurren
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<Membership> Memberships => Set<Membership>();
     public DbSet<Repository> Repositories => Set<Repository>();
+    public DbSet<Domain.Secrets.Secret> Secrets => Set<Domain.Secrets.Secret>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder b)
     {
@@ -92,6 +93,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ICurren
             e.HasKey(x => new { x.OrgId, x.UserId });
         });
         m.Entity<Repository>(e => e.ToTable("repositories"));
+        m.Entity<Domain.Secrets.Secret>(e => e.ToTable("secrets"));
 
         // organization isolation: every org-scoped table is filtered to the current organization
         m.Entity<Pipeline>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
@@ -100,6 +102,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ICurren
         m.Entity<DeployEnvironment>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
         m.Entity<Deployment>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
         m.Entity<Repository>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
+        m.Entity<Domain.Secrets.Secret>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
         m.Entity<Agent>().HasQueryFilter(x => OrgFilter == null || x.OrgId == null || x.OrgId == OrgFilter);
 
         // relationships without navigations, mirroring the FKs in db/migrations (also orders inserts)
@@ -110,6 +113,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ICurren
         m.Entity<Build>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
         m.Entity<GitConnection>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
         m.Entity<DeployEnvironment>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
+        m.Entity<Domain.Secrets.Secret>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
         m.Entity<Agent>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
         m.Entity<Membership>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
         m.Entity<Membership>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);

@@ -26,6 +26,8 @@ public sealed class BuildJob
     public Dictionary<string, string> TaskVars { get; private set; } = new();
     public List<string> Labels { get; private set; } = new();
     public List<string> Artifacts { get; private set; } = new();
+    /// <summary>Secret names the task declared (x-secrets); values are fetched by the agent at run time.</summary>
+    public List<string> Secrets { get; private set; } = new();
     public bool HasCommands { get; private set; }
     public ApprovalSpec? Approval { get; private set; }
     public DeploySpec? Deploy { get; private set; }
@@ -47,8 +49,9 @@ public sealed class BuildJob
 
     public BuildJob(string key, string taskName, string? description, int order, IEnumerable<string> dependsOn,
         Dictionary<string, string>? taskVars, IEnumerable<string>? labels, IEnumerable<string>? artifacts,
-        bool hasCommands, ApprovalSpec? approval, DeploySpec? deploy)
+        bool hasCommands, ApprovalSpec? approval, DeploySpec? deploy, IEnumerable<string>? secrets = null)
     {
+        Secrets = secrets?.ToList() ?? new();
         Key = key;
         TaskName = taskName;
         Description = description;

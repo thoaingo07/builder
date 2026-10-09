@@ -184,6 +184,45 @@ public sealed class EndToEndTests(AspireFixture aspire) : IDisposable
     }
 
     [Fact]
+    public async Task Secrets_reach_the_task_as_vars_and_env_and_never_appear_in_logs()
+    {
+        const string Value = "s3cr3t-value-123";
+        var repo = CreateRepository(new()
+        {
+            [".builder/runners/secret.yml"] = """
+                version: '3'
+                tasks:
+                  default:
+                    x-secrets: [API_TOKEN]
+                    cmds:
+                      - echo "env=$API_TOKEN"
+                      - echo "var={{.API_TOKEN}}"
+                      - test "$API_TOKEN" = "s3cr3t-value-123"
+                """,
+            [".builder/runners/missing.yml"] = "version: '3'\ntasks:\n  default:\n    x-secrets: [NOPE]\n    cmds:\n      - echo hi\n",
+        });
+        using var http = await LoginAsync();
+        var secret = await PostAsync(http, "/api/secrets", new { name = "API_TOKEN", value = Value, description = "test" });
+        Assert.Null(secret["value"]);                                     // never returned
+        Assert.DoesNotContain(Value, await http.GetStringAsync("/api/secrets"));
+        Assert.Equal(HttpStatusCode.Conflict, (await http.PostAsJsonAsync("/api/secrets", new { name = "bad-name", value = "x" })).StatusCode);
+
+        var runner = await E2E.MapRunnerAsync(http, repo, ".builder/runners/secret.yml");
+        var build = await E2E.RunBuildAsync(http, runner);
+        Assert.Equal("Succeeded", build["status"]!.GetValue<string>());
+        Assert.Equal(["API_TOKEN"], build["jobs"]![0]!["secrets"]!.AsArray().Select(x => x!.GetValue<string>()));
+        var logs = await http.GetStringAsync($"/api/builds/{build["id"]}/jobs/{build["jobs"]![0]!["id"]}/logs");
+        Assert.Contains("env=***", logs);
+        Assert.Contains("var=***", logs);
+        Assert.DoesNotContain(Value, logs);
+
+        var missing = await E2E.MapRunnerAsync(http, repo, ".builder/runners/missing.yml");
+        var failed = await E2E.RunBuildAsync(http, missing);
+        Assert.Equal("Failed", failed["status"]!.GetValue<string>());
+        Assert.Contains("Unknown secret(s): NOPE", failed["error"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task Cancel_stops_a_running_build()
     {
         var repo = CreateRepository(new() { [".builder/runners/slow.yml"] = "version: '3'\ntasks:\n  default:\n    cmds:\n      - sleep 120\n" });

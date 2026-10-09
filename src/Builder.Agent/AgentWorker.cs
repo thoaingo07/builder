@@ -145,6 +145,9 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
 
     public Task JobStartedAsync(Guid jobId) => _hub.InvokeAsync(AgentHubNames.JobStarted, jobId);
 
+    public Task<Dictionary<string, string>> GetJobSecretsAsync(Guid jobId) =>
+        _hub.InvokeAsync<Dictionary<string, string>>(AgentHubNames.GetJobSecrets, jobId);
+
     public Task SendLogAsync(Guid jobId, List<LogChunk> lines) => _hub.State == HubConnectionState.Connected
         ? _hub.InvokeAsync(AgentHubNames.JobLog, jobId, lines)
         : Task.CompletedTask;

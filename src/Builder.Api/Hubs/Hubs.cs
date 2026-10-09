@@ -66,7 +66,7 @@ public sealed class AgentConnections
 }
 
 [Authorize(Policy = AuthSchemes.AgentPolicy)]
-public sealed class AgentHub(AgentService agents, AgentConnections connections) : Hub
+public sealed class AgentHub(AgentService agents, SecretService secrets, AgentConnections connections) : Hub
 {
     private Guid AgentId => Context.Items.TryGetValue("agentId", out var id) && id is Guid g
         ? g : throw new HubException("Register first.");
@@ -86,6 +86,9 @@ public sealed class AgentHub(AgentService agents, AgentConnections connections) 
     public Task JobCompleted(JobResult result) => agents.JobCompletedAsync(result, CancellationToken.None);
     public Task TeardownCompleted(TeardownResult result) => agents.TeardownCompletedAsync(result, CancellationToken.None);
     public Task CleanupCompleted(CleanupResult result) => Task.CompletedTask;
+
+    /// <summary>Secret values for a job this agent is running (checked server-side).</summary>
+    public Task<Dictionary<string, string>> GetJobSecrets(Guid jobId) => secrets.ForJobAsync(AgentId, jobId, Context.ConnectionAborted);
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {

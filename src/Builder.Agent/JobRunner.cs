@@ -12,11 +12,19 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
         var deployer = job.Deploy is { } target ? new Deployer(target, Path.Combine(workspace.Temp, job.JobId.ToString("N")), options.WorkRoot) : null;
         await using var log = new JobLog(lines => server.SendLogAsync(job.JobId, lines),
             [job.Source.AuthorizationHeader, job.Deploy?.PrivateKey, job.Deploy?.AksClientSecret, job.Deploy?.Kubeconfig]);
+        var secrets = new Dictionary<string, string>();
         string? derivedTaskfile = null;
         try
         {
             await server.JobStartedAsync(job.JobId);
             log.System($"Agent {options.EffectiveName} running '{job.TaskName}' of {job.PipelineName} #{job.BuildNumber}");
+            if (job.Secrets.Length > 0)
+            {
+                // fetched at run time, only for this job; masked in everything we log from here on
+                secrets = await server.GetJobSecretsAsync(job.JobId);
+                log.AddSecrets(secrets.Values);
+                log.System($"Secrets: {string.Join(", ", secrets.Keys.Order())}");
+            }
 
             await workspace.CheckoutAsync(job.Source, log, ct);
             // runners run from the repository root (go-task --dir), so artifact globs are repository-relative too
@@ -39,6 +47,9 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
             derivedTaskfile = workspace.PrepareTaskfile(job.TaskfilePath, job.TaskName, job.JobId);
             List<string> args = ["--dir", workspace.Source, "--taskfile", derivedTaskfile, "--yes", "--color=false", job.TaskName];
             args.AddRange(job.TaskVars.Select(kv => $"{kv.Key}={kv.Value}"));
+            // secrets: go-task vars ({{.NAME}}) and environment variables ($NAME)
+            args.AddRange(secrets.Select(kv => $"{kv.Key}={kv.Value}"));
+            foreach (var (k, v) in secrets) env[k] = v;
             env["NO_COLOR"] = "1";
 
             // go-task echoes each command as "task: [name] cmd" on stderr; show those as step markers, not errors
@@ -102,4 +113,5 @@ public interface IServerChannel
 {
     Task JobStartedAsync(Guid jobId);
     Task SendLogAsync(Guid jobId, List<LogChunk> lines);
+    Task<Dictionary<string, string>> GetJobSecretsAsync(Guid jobId);
 }

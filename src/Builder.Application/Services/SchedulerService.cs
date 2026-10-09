@@ -127,7 +127,7 @@ public sealed class SchedulerService(
             new GitSource(remote.Url, build.Branch, build.Commit!, remote.AuthorizationHeader),
             pipeline.TaskfilePath, env, job.Artifacts.ToArray(),
             artifacts.Select(a => new ArtifactRef(a.Id, a.Name, $"/api/agent/artifacts/{a.Id}")).ToArray(),
-            deploy);
+            deploy, job.Secrets.ToArray());
     }
 
     public DeployTarget ToTarget(DeployEnvironment e, DeploySpec spec, Build? build) => new(

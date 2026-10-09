@@ -10,17 +10,23 @@ public sealed partial class JobLog : IAsyncDisposable
     private readonly Channel<LogChunk> _channel = Channel.CreateUnbounded<LogChunk>(new() { SingleReader = true });
     private readonly Func<List<LogChunk>, Task> _send;
     private readonly Task _pump;
-    private readonly List<string> _secrets;
+    private List<string> _secrets;
 
     public JobLog(Func<List<LogChunk>, Task> send, IEnumerable<string?> secrets)
     {
         _send = send;
         // mask secrets (and each of their lines, for multi-line keys) in everything we ship
-        _secrets = secrets.Where(s => !string.IsNullOrWhiteSpace(s) && s!.Length >= 4)
-            .SelectMany(s => s!.Split('\n').Select(l => l.Trim()).Where(l => l.Length >= 4).Append(s!))
-            .Distinct().OrderByDescending(s => s.Length).ToList();
+        _secrets = Expand(secrets).Distinct().OrderByDescending(s => s.Length).ToList();
         _pump = Task.Run(PumpAsync);
     }
+
+    /// <summary>Adds values to mask (e.g. secrets fetched after the log was created).</summary>
+    public void AddSecrets(IEnumerable<string> values) =>
+        _secrets = _secrets.Concat(Expand(values)).Distinct().OrderByDescending(s => s.Length).ToList();
+
+    private static IEnumerable<string> Expand(IEnumerable<string?> values) =>
+        values.Where(s => !string.IsNullOrWhiteSpace(s) && s!.Length >= 4)
+            .SelectMany(s => s!.Split('\n').Select(l => l.Trim()).Where(l => l.Length >= 4).Append(s!));
 
     public void Out(string text) => Write(LogStream.Out, text);
     public void Err(string text) => Write(LogStream.Err, text);

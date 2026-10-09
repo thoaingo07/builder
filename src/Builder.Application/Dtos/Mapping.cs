@@ -28,7 +28,7 @@ public static class Mapping
         b.Jobs.OrderBy(j => j.Order).Select(j => j.ToDto()).ToList(), artifacts, deployments);
 
     public static JobDto ToDto(this BuildJob j) => new(
-        j.Id, j.BuildId, j.Key, j.TaskName, j.Description, j.Order, j.DependsOn, j.Labels, j.Artifacts, j.Status,
+        j.Id, j.BuildId, j.Key, j.TaskName, j.Description, j.Order, j.DependsOn, j.Labels, j.Artifacts, j.Secrets, j.Status,
         j.AgentId, j.AgentName, j.ExitCode, j.Error, j.StartedAt, j.FinishedAt,
         j.Approval is null ? null : new ApprovalDto(j.Approval.Message, j.Approval.Approvers, j.ApprovedBy, j.ApprovedAt, j.ApprovalComment),
         j.Deploy);

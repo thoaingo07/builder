@@ -40,6 +40,47 @@ Dependencies point inward only: `Api/Bff/Infrastructure → Application → Doma
 
 Runtime packaging: `deploy/containers/*.Containerfile` + `deploy/compose.yml` (Podman or Docker).
 
+## Deployment model: cloud control plane, daemons on your servers
+
+The UI, BFF, API and PostgreSQL run in the cloud. **Daemons** (`Builder.Agent`) run on your own servers and dial
+**out** to the API over HTTPS/WebSockets (no inbound ports, NAT is fine). The cloud never clones a repository:
+for Azure DevOps it reads branches, runner files and Taskfiles through the REST API and commits Taskfile edits
+with the pushes API. Daemons do the work: fetch the repository at the build's commit, run the steps, fetch the
+job's secrets at run time, deploy, upload artifacts, stop on cancel, and clean up workspaces / container images.
+
+## Organizations
+
+Every user can create organizations and invite people by e-mail (an invited e-mail may sign in with Google).
+Connections, repositories, runners, builds, environments, deployments, secrets and agents belong to one
+organization; EF Core global query filters scope every query to the organization in the `X-Org` header after a
+membership check, and background work (scheduler, planner) scopes explicitly by the build's organization.
+Agents register with their organization's token, or with the system token as **shared** agents that serve every
+organization (an organization's own agents are preferred).
+
+## Repositories and runners
+
+A repository is added once per organization (Azure DevOps picker: project → repository → branch). Builder lists
+`.builder/runners/*.yml|yaml` on any branch; you pick which files to **map** into runners. Running a runner runs
+that file on the branch you choose, **from the repository root** (`task --dir <root> --taskfile <runner>`), so
+locally the equivalent is `task -d . -t .builder/runners/ci.yml`.
+
+## Secrets
+
+Organization secrets are encrypted at rest and write-only in the UI/API. A task declares what it needs:
+
+```yaml
+deploy:
+  x-secrets: [REGISTRY_TOKEN, DB_PASSWORD]
+  cmds:
+    - echo "$REGISTRY_TOKEN" | docker login -u ci --password-stdin registry.example.com
+    - ./migrate --password {{.DB_PASSWORD}}
+```
+
+Planning fails early when a declared secret does not exist. At run time the daemon asks the API for the job's
+secrets over its authenticated connection; the API only answers the agent the job is assigned to, while the job
+runs, and only with the declared names. The daemon passes them to go-task as variables (`NAME=value` arguments)
+and environment variables, and masks the values (≥ 4 characters) in every log line it ships.
+
 ## Pipelines are Taskfiles
 
 Pipelines are plain [go-task](https://taskfile.dev) `Taskfile.yml` files kept in

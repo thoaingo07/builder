@@ -84,6 +84,10 @@ public sealed class TaskfilePlanner : ITaskfilePlanner
 
         var artifacts = m is null ? [] : Strings(Get(m, "x-artifacts")).ToList();
 
+        var secrets = m is null ? [] : Strings(Get(m, "x-secrets")).ToList();
+        foreach (var bad in secrets.Where(s => !Domain.Secrets.Secret.IsValidName(s)))
+            throw new TaskfileException($"Task '{name}': '{bad}' is not a valid secret name (UPPER_SNAKE_CASE)."); 
+
         ApprovalSpec? approval = null;
         if (m is not null && Get(m, "x-approval") is { } ap)
         {
@@ -107,7 +111,7 @@ public sealed class TaskfilePlanner : ITaskfilePlanner
         }
 
         var desc = m is null ? null : Scalar(Get(m, "desc")) ?? Scalar(Get(m, "summary"));
-        return new PlannedJob(key, name, desc, order, deps, vars, labels, artifacts, hasCommands, approval, deploy);
+        return new PlannedJob(key, name, desc, order, deps, vars, labels, artifacts, hasCommands, approval, deploy, secrets);
     }
 
     private static IEnumerable<(string Name, Dictionary<string, string> Vars)> DepsOf(YamlNode node)

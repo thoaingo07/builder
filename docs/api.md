@@ -1,9 +1,20 @@
 # API surface (UI ⇄ BFF ⇄ API)
 
-The browser only talks to the **BFF** (same origin). Everything under `/api/*` and
-`/hubs/ui` is proxied to the API. JSON is camelCase, enums are strings, dates are
-ISO-8601. Every `/api` request from the browser must send header `X-CSRF: 1`.
-Errors: `{ "title": string, "detail"?: string, "status": number }` (ProblemDetails).
+The browser only talks to the **BFF** (same origin). Everything under `/api/*` and `/hubs/ui` is proxied to the
+API. JSON is camelCase, enums are strings, dates are ISO-8601. Every non-GET `/api` and `/bff` request from the
+browser must send header `X-CSRF: 1`. Errors: `{ "title": string, "detail"?: string, "status": number }`
+(ProblemDetails). 401 = signed out, 403 = role too low, 404 = not found **or not in your organization**,
+409 = business rule, 502 = Azure DevOps / git host problem (message is user-facing).
+
+## Organizations
+
+A user belongs to one or more organizations. The UI keeps the **current organization** and sends its id in the
+**`X-Org` header on every `/api` call** except `/api/me` and `POST /api/orgs`. Without it org-scoped endpoints
+return 400; with an organization the user is not a member of, 404. Roles: `Member` < `Admin` < `Owner`.
+
+- Member: view everything, run/cancel/re-run builds, approve (if listed as approver), edit Taskfiles.
+- Admin: + connections, repositories & runner mapping, environments, secrets, agents, members (not owners), cleanup.
+- Owner: + manage owners. An organization always keeps at least one owner.
 
 ## BFF
 
@@ -12,22 +23,52 @@ Errors: `{ "title": string, "detail"?: string, "status": number }` (ProblemDetai
 | POST | `/bff/login` | `{ userName, password }` → `UserDto` (sets cookie) · 401 |
 | POST | `/bff/logout` | — |
 | GET | `/bff/user` | `UserDto` · 401 when signed out |
+| GET | `/bff/providers` | `{ password: boolean, google: boolean }` |
+| GET | `/bff/login/google?returnUrl=/x` | browser navigation → Google → back to `returnUrl`, or `/login?error=not_allowed|google_failed` |
 
 ## Types
 
 ```ts
 type UserDto = { userName: string; displayName: string; isAdmin: boolean }
 
+type OrgRole = 'Member'|'Admin'|'Owner'
+type OrgDto = { id; name; slug; role: OrgRole; memberCount: number; createdAt }
+type MeDto = { user: UserDto; orgs: OrgDto[] }
+type OrgCreatedDto = { org: OrgDto; agentToken: string }      // token shown once
+type MemberDto = { userId; userName; displayName; email: string|null; role: OrgRole; canSignInWithGoogle: boolean; joinedAt }
+
+type ConnectionType = 'AzureDevOps'|'Git'
+type ConnectionDto = { id; name; type: ConnectionType; url; username: string|null; hasToken: boolean }
+// AzureDevOps: url = https://dev.azure.com/<org> (normalized server-side), token = PAT (Code: Read, or Read & write to save Taskfiles)
+type ConnectionInput = { name; type; url; username?; token?: string|null }   // token write-only; omit to keep
+type ConnectionTestDto = { ok: boolean; message: string }
+type RemoteRepositoryDto = { project: string; name: string; url: string; defaultBranch: string|null }
+
+type RepositoryDto = { id; name; url; connectionId: string|null; connectionName: string|null; defaultBranch; runnerCount: number; createdAt }
+type RepositoryInput = { connectionId?: string|null; name?: string|null; url: string; defaultBranch?: string|null }
+type RunnerFileDto = {
+  path: string                 // e.g. ".builder/runners/ci.yml"
+  suggestedName: string        // "ci"
+  entryTask: string|null       // what a build runs by default (x-builder.entry or "default")
+  tasks: string[]              // job keys reachable from the entry
+  error: string|null           // the file can't be planned (shown, can't be mapped meaningfully)
+  mappedRunnerId: string|null; mappedRunnerName: string|null
+}
+type RunnerFilesDto = { branch: string; commit: string; files: RunnerFileDto[] }
+type MapRunnersInput = { runners: { path: string; name?: string|null; entryTask?: string|null }[] }
+
+// a "runner" = one mapped runner file (API path name stays /pipelines)
+type PipelineDto = {
+  id; name; repositoryId; repositoryName; repositoryUrl; defaultBranch
+  taskfilePath: string; entryTask: string|null; lastBuild: BuildSummaryDto|null
+}
+type PipelineInput = { name: string; entryTask?: string|null }
+
+type SecretDto = { id; name: string; description: string|null; updatedAt; updatedBy: string }
+type SecretInput = { name: string; value?: string|null; description?: string|null }   // value write-only; omit on update to keep
+
 type BuildStatus = 'Planning'|'Running'|'Canceling'|'Succeeded'|'Failed'|'Canceled'
 type JobStatus = 'Pending'|'Queued'|'WaitingApproval'|'Assigned'|'Running'|'Succeeded'|'Failed'|'Canceled'|'Skipped'
-
-type PipelineDto = {
-  id: string; name: string; connectionId: string|null; connectionName: string|null
-  repositoryUrl: string; defaultBranch: string; taskfilePath: string; entryTask: string|null
-  lastBuild: BuildSummaryDto|null
-}
-type PipelineInput = { name; connectionId?; repositoryUrl; defaultBranch; taskfilePath; entryTask? }
-
 type JobCounts = { total; pending; running; waitingApproval; succeeded; failed; skipped; canceled }
 type BuildSummaryDto = {
   id; pipelineId; pipelineName; number: number; branch; commit: string|null; entryTask
@@ -38,8 +79,7 @@ type ApprovalDto = { message: string; approvers: string[]; decidedBy: string|nul
 type DeploySpecDto = { environment; compose; project; manifests; namespace; url }
 type JobDto = {
   id; buildId; key; taskName; description: string|null; order: number
-  dependsOn: string[]   // keys of other jobs in the same build
-  labels: string[]; artifacts: string[]; status: JobStatus
+  dependsOn: string[]; labels: string[]; artifacts: string[]; secrets: string[]; status: JobStatus
   agentId: string|null; agentName: string|null; exitCode: number|null; error: string|null
   startedAt: string|null; finishedAt: string|null
   approval: ApprovalDto|null; deploy: DeploySpecDto|null
@@ -51,25 +91,23 @@ type BuildDetailDto = BuildSummaryDto & {
 type LogLineDto = { id: number; jobId: string; timestamp: string; stream: 'Out'|'Err'|'System'; text: string }
 
 type AgentMetricsDto = {
-  at: string; cpuPercent: number; cpuCount: number
-  memoryTotalBytes: number; memoryUsedBytes: number
-  diskTotalBytes: number; diskUsedBytes: number
-  loadAverage1: number; runningJobs: number
+  at: string; cpuPercent: number; cpuCount: number; memoryTotalBytes: number; memoryUsedBytes: number
+  diskTotalBytes: number; diskUsedBytes: number; loadAverage1: number; runningJobs: number
 }
 type AgentDto = {
-  id; name; hostName; os; version; capacity: number; labels: string[]
+  id; shared: boolean                         // shared = serves every organization; not manageable from the org
+  name; hostName; os; version; capacity: number; labels: string[]
   enabled: boolean; online: boolean; lastSeenAt: string|null
-  metrics: AgentMetricsDto|null; runningJobs: { buildId; buildNumber; pipelineName; jobId; taskName }[]
+  metrics: AgentMetricsDto|null; runningJobs: { buildId; buildNumber; pipelineName; jobId; taskName }[]  // this org's only
 }
 
-type EnvironmentType = 'SshDocker'|'Kubernetes'
+type EnvironmentType = 'SshDocker'|'Kubernetes'   // SshDocker = SSH + compose on a Docker or Podman host
 type EnvironmentDto = {
   id; name; type: EnvironmentType; requiresApproval: boolean; approvers: string[]; agentLabels: string[]
   host: string|null; port: number; username: string|null; hasPrivateKey: boolean
   hasKubeconfig: boolean; aksTenantId; aksClientId; hasAksClientSecret: boolean
   aksSubscriptionId; aksResourceGroup; aksClusterName; aksAdmin: boolean
 }
-// secrets are write-only: send them to set/replace, omit (null) to keep the stored value
 type EnvironmentInput = Omit<EnvironmentDto,'id'|'hasPrivateKey'|'hasKubeconfig'|'hasAksClientSecret'>
   & { privateKey?: string|null; kubeconfig?: string|null; aksClientSecret?: string|null }
 
@@ -79,65 +117,85 @@ type DeploymentDto = {
   name: string; url: string|null; status: DeploymentStatus; output: string|null; createdAt; updatedAt: string|null
 }
 
-type ConnectionType = 'AzureDevOps'|'Git'
-type ConnectionDto = { id; name; type: ConnectionType; url; username: string|null; hasToken: boolean }
-type ConnectionInput = { name; type; url; username?; token?: string|null }
-type RepositoryDto = { project: string; name: string; url: string; defaultBranch: string|null }
-
 type PlanPreviewDto = { entryTask: string; jobs: { key; taskName; dependsOn: string[]; approval: boolean; deploy: string|null }[]; error: string|null }
 type TaskfileDto = { path: string; branch: string; commit: string; content: string }
 type DashboardDto = {
   agents: AgentDto[]; activeBuilds: BuildSummaryDto[]; recentBuilds: BuildSummaryDto[]
-  activeDeployments: DeploymentDto[]
-  last24h: { succeeded: number; failed: number; canceled: number; running: number }
+  activeDeployments: DeploymentDto[]; last24h: { succeeded: number; failed: number; canceled: number; running: number }
 }
 ```
 
 ## Endpoints (prefix `/api`)
 
+Personal (no `X-Org`):
+
 | Method | Path | Body → Result |
 |---|---|---|
-| GET | `/dashboard` | `DashboardDto` |
-| GET | `/pipelines` | `PipelineDto[]` |
-| GET | `/pipelines/{id}` | `PipelineDto` |
-| POST | `/pipelines` | `PipelineInput` → `PipelineDto` |
-| PUT | `/pipelines/{id}` | `PipelineInput` → `PipelineDto` |
-| DELETE | `/pipelines/{id}` | 204 |
-| GET | `/pipelines/{id}/taskfile?branch=` | `TaskfileDto` |
-| PUT | `/pipelines/{id}/taskfile` | `{ branch, content, message }` → `TaskfileDto` (commits & pushes) |
-| POST | `/pipelines/plan` | `{ content, entryTask? }` → `PlanPreviewDto` (validation, no git) |
-| POST | `/pipelines/{id}/builds` | `{ branch?, entryTask?, variables? }` → `BuildSummaryDto` |
-| GET | `/builds?pipelineId=&status=&take=50` | `BuildSummaryDto[]` (newest first) |
-| GET | `/builds/{id}` | `BuildDetailDto` |
-| POST | `/builds/{id}/cancel` | `BuildSummaryDto` |
-| POST | `/builds/{id}/rerun` | `BuildSummaryDto` (new build, same commit inputs) |
-| DELETE | `/builds/{id}` | 204 (finished builds only) |
-| POST | `/builds/{id}/jobs/{jobId}/approval` | `{ approved: boolean, comment? }` → `JobDto` |
-| GET | `/builds/{id}/jobs/{jobId}/logs?after=0` | `LogLineDto[]` (max 5000, `id > after`) |
-| GET | `/artifacts/{id}` | file download (tar.gz) |
-| GET | `/agents` | `AgentDto[]` |
-| PUT | `/agents/{id}` | `{ enabled }` → `AgentDto` |
-| DELETE | `/agents/{id}` | 204 (offline only) |
-| GET | `/agents/{id}/metrics` | `AgentMetricsDto[]` (last ~15 min, 5 s resolution) |
-| POST | `/agents/{id}/cleanup` | `{ removeWorkspaces, dockerPrune }` → 202 |
-| GET/POST | `/environments` | `EnvironmentDto[]` / `EnvironmentInput` → `EnvironmentDto` |
-| PUT/DELETE | `/environments/{id}` | `EnvironmentInput` → `EnvironmentDto` / 204 |
-| GET | `/deployments?environmentId=&active=true` | `DeploymentDto[]` |
-| POST | `/deployments/{id}/destroy` | `DeploymentDto` (teardown on an agent) |
-| GET/POST | `/connections` | `ConnectionDto[]` / `ConnectionInput` → `ConnectionDto` |
-| PUT/DELETE | `/connections/{id}` | `ConnectionInput` → `ConnectionDto` / 204 |
-| GET | `/connections/{id}/repositories` | `RepositoryDto[]` (Azure DevOps only) |
-| POST | `/cleanup` | `{ olderThanDays, keepLastPerPipeline, removeWorkspaces, dockerPrune }` → `{ buildsDeleted, artifactsDeleted, bytesFreed, agentsNotified }` |
+| GET | `/me` | `MeDto` |
+| POST | `/orgs` | `{ name }` → `OrgCreatedDto` (caller becomes Owner) |
+
+Current organization (`X-Org` required):
+
+| Method | Path | Body → Result | Role |
+|---|---|---|---|
+| PUT | `/org` | `{ name }` → `OrgDto` | Admin |
+| POST | `/org/agent-token` | → `{ agentToken }` (new token, shown once; old one stops working) | Admin |
+| GET | `/org/members` | `MemberDto[]` | |
+| POST | `/org/members` | `{ email, role }` → `MemberDto` (unknown e-mail = invitation: can sign in with Google) | Admin (Owner to add owners) |
+| PUT | `/org/members/{userId}` | `{ role }` → `MemberDto` | Admin |
+| DELETE | `/org/members/{userId}` | 204 (anyone may remove themselves = leave) | Admin |
+| GET | `/dashboard` | `DashboardDto` | |
+| GET/POST | `/connections` | `ConnectionDto[]` / `ConnectionInput` → `ConnectionDto` | /Admin |
+| PUT/DELETE | `/connections/{id}` | `ConnectionInput` → `ConnectionDto` / 204 | Admin |
+| POST | `/connections/{id}/test` | `ConnectionTestDto` | |
+| GET | `/connections/{id}/projects` | `string[]` (Azure DevOps) | |
+| GET | `/connections/{id}/repositories?project=` | `RemoteRepositoryDto[]` (Azure DevOps) | |
+| GET | `/connections/{id}/branches?url=` | `string[]` (any git URL through this connection) | |
+| GET/POST | `/repositories` | `RepositoryDto[]` / `RepositoryInput` → `RepositoryDto` (validates access) | /Admin |
+| GET/PUT/DELETE | `/repositories/{id}` | `RepositoryDto` / `RepositoryInput` → `RepositoryDto` / 204 (deletes its runners+builds) | /Admin/Admin |
+| GET | `/repositories/{id}/branches` | `string[]` (default branch first) | |
+| GET | `/repositories/{id}/runner-files?branch=` | `RunnerFilesDto` (`.builder/runners/*.yml|yaml` at that branch) | |
+| POST | `/repositories/{id}/runners` | `MapRunnersInput` → `PipelineDto[]` (newly mapped; already-mapped files ignored) | Admin |
+| GET | `/pipelines` | `PipelineDto[]` (runners) | |
+| GET/PUT/DELETE | `/pipelines/{id}` | `PipelineDto` / `PipelineInput` → `PipelineDto` / 204 (unmap) | /Admin/Admin |
+| GET | `/pipelines/{id}/taskfile?branch=` | `TaskfileDto` (404 if the file isn't on that branch) | |
+| PUT | `/pipelines/{id}/taskfile` | `{ branch, content, message }` → `TaskfileDto` (commit + push) | |
+| POST | `/pipelines/plan` | `{ content, entryTask? }` → `PlanPreviewDto` | |
+| POST | `/pipelines/{id}/builds` | `{ branch?, entryTask?, variables? }` → `BuildSummaryDto` | |
+| GET/POST | `/secrets` | `SecretDto[]` / `SecretInput` → `SecretDto` (name `^[A-Z][A-Z0-9_]*$`, unique) | /Admin |
+| PUT/DELETE | `/secrets/{id}` | `SecretInput` → `SecretDto` / 204 | Admin |
+| GET | `/builds?pipelineId=&status=&take=50` | `BuildSummaryDto[]` | |
+| GET | `/builds/{id}` | `BuildDetailDto` | |
+| POST | `/builds/{id}/cancel` · `/rerun` | `BuildSummaryDto` | |
+| DELETE | `/builds/{id}` | 204 | |
+| POST | `/builds/{id}/jobs/{jobId}/approval` | `{ approved, comment? }` → `JobDto` | |
+| GET | `/builds/{id}/jobs/{jobId}/logs?after=0` | `LogLineDto[]` | |
+| GET | `/artifacts/{id}` | file download | |
+| GET | `/agents` | `AgentDto[]` (own + shared) | |
+| PUT/DELETE | `/agents/{id}` | `{ enabled }` → `AgentDto` / 204 (own agents only) | Admin |
+| GET | `/agents/{id}/metrics` | `AgentMetricsDto[]` | |
+| POST | `/agents/{id}/cleanup` | `{ removeWorkspaces, dockerPrune }` → 202 | Admin |
+| GET/POST, PUT/DELETE | `/environments`, `/environments/{id}` | as before | /Admin |
+| GET | `/deployments?environmentId=&active=true` | `DeploymentDto[]` | |
+| POST | `/deployments/{id}/destroy` | `DeploymentDto` | |
+| POST | `/cleanup` | `{ olderThanDays, keepLastPerPipeline, removeWorkspaces, dockerPrune }` → `{ buildsDeleted, artifactsDeleted, bytesFreed, agentsNotified }` | Admin |
 
 ## Live updates — SignalR hub `/hubs/ui`
 
-Client → server: `JoinBuild(buildId)`, `LeaveBuild(buildId)`.
-Server → client (all connected clients unless noted):
+Client → server: `JoinOrg(orgId)` (call after connecting and whenever the current organization changes; also after
+reconnect), `JoinBuild(buildId)`, `LeaveBuild(buildId)`. Both check membership (HubException otherwise).
 
-| Event | Payload |
-|---|---|
-| `BuildUpdated` | `BuildSummaryDto` |
-| `JobUpdated` | `JobDto` (only clients that joined the build) |
-| `Log` | `(buildId: string, lines: LogLineDto[])` (only joined clients) |
-| `AgentsUpdated` | `AgentDto[]` (every ~3 s) |
-| `DeploymentUpdated` | `DeploymentDto` |
+| Event | Payload | Who |
+|---|---|---|
+| `BuildUpdated` | `BuildSummaryDto` | members of the build's organization |
+| `JobUpdated` | `JobDto` | clients that joined the build |
+| `Log` | `(buildId, LogLineDto[])` | clients that joined the build |
+| `AgentsUpdated` | `AgentDto[]` (own + shared, every ~3 s) | the organization |
+| `DeploymentUpdated` | `DeploymentDto` | the organization |
+
+## Agents (daemons)
+
+A daemon connects out to the API (`/hubs/agent`, header `X-Agent-Token`). An organization's token (from
+`POST /api/org/agent-token`) registers that organization's agents; the system token (`Agents:Token`) registers
+shared agents. Install: `Agent__ServerUrl=https://<api> Agent__Token=<token> dotnet Builder.Agent.dll` or the agent
+container image.

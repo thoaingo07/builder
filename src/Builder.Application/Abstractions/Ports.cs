@@ -27,6 +27,7 @@ public interface IAppDbContext
     DbSet<Organization> Organizations { get; }
     DbSet<Membership> Memberships { get; }
     DbSet<Repository> Repositories { get; }
+    DbSet<Domain.Secrets.Secret> Secrets { get; }
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 }
 
@@ -70,7 +71,8 @@ public sealed record PlannedJob(
     IReadOnlyList<string> Artifacts,
     bool HasCommands,
     ApprovalSpec? Approval,
-    DeploySpec? Deploy);
+    DeploySpec? Deploy,
+    IReadOnlyList<string> Secrets);
 
 public sealed record TaskfilePlan(string EntryTask, IReadOnlyList<PlannedJob> Jobs);
 

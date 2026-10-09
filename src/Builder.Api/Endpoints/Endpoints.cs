@@ -136,6 +136,17 @@ public static class Endpoints
         api.MapGet("/connections/{id:guid}/branches", (Guid id, string url, ConnectionService s, CancellationToken ct) =>
             s.BranchesAsync(id, url, ct));
 
+        // secrets (values are write-only)
+        api.MapGet("/secrets", (SecretService s, CancellationToken ct) => s.ListAsync(ct));
+        api.MapPost("/secrets", (SecretInput input, ClaimsPrincipal u, SecretService s, CancellationToken ct) => s.CreateAsync(input, u.UserName(), ct));
+        api.MapPut("/secrets/{id:guid}", (Guid id, SecretInput input, ClaimsPrincipal u, SecretService s, CancellationToken ct) =>
+            s.UpdateAsync(id, input, u.UserName(), ct));
+        api.MapDelete("/secrets/{id:guid}", async (Guid id, SecretService s, CancellationToken ct) =>
+        {
+            await s.DeleteAsync(id, ct);
+            return Results.NoContent();
+        });
+
         api.MapPost("/cleanup", (CleanupInput input, CleanupService s, CancellationToken ct) => s.RunAsync(input, ct));
 
         // BFF-only: validates credentials and returns the user the BFF puts in its cookie.

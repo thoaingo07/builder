@@ -18,7 +18,7 @@ public sealed record ApprovalDto(string Message, List<string> Approvers, string?
 
 public sealed record JobDto(
     Guid Id, Guid BuildId, string Key, string TaskName, string? Description, int Order, List<string> DependsOn,
-    List<string> Labels, List<string> Artifacts, JobStatus Status, Guid? AgentId, string? AgentName,
+    List<string> Labels, List<string> Artifacts, List<string> Secrets, JobStatus Status, Guid? AgentId, string? AgentName,
     int? ExitCode, string? Error, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt,
     ApprovalDto? Approval, DeploySpec? Deploy);
 
@@ -105,6 +105,9 @@ public sealed record MemberDto(Guid UserId, string UserName, string DisplayName,
 public sealed record AddMemberInput(string Email, OrgRole Role);
 public sealed record ChangeRoleInput(OrgRole Role);
 public sealed record MeDto(UserDto User, List<OrgDto> Orgs);
+
+public sealed record SecretDto(Guid Id, string Name, string? Description, DateTimeOffset UpdatedAt, string UpdatedBy);
+public sealed record SecretInput(string Name, string? Value, string? Description);
 
 public sealed record CleanupInput(int OlderThanDays, int KeepLastPerPipeline, bool RemoveWorkspaces, bool DockerPrune);
 public sealed record CleanupResultDto(int BuildsDeleted, int ArtifactsDeleted, long BytesFreed, int AgentsNotified);

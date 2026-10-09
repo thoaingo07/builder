@@ -73,6 +73,13 @@ public sealed class BuildPlanningService(
         if (missing.Count > 0)
             throw new TaskfileException($"Unknown deploy environment(s): {string.Join(", ", missing)}. Create them under Environments.");
 
+        var wanted = plan.Jobs.SelectMany(j => j.Secrets).Distinct().ToList();
+        var known = await db.Secrets.AsNoTracking().IgnoreQueryFilters().Where(s => s.OrgId == orgId && wanted.Contains(s.Name))
+            .Select(s => s.Name).ToListAsync(ct);
+        var unknown = wanted.Except(known).ToList();
+        if (unknown.Count > 0)
+            throw new TaskfileException($"Unknown secret(s): {string.Join(", ", unknown)}. Add them under Secrets.");
+
         return plan.Jobs.Select(p =>
         {
             var approval = p.Approval;
@@ -89,7 +96,7 @@ public sealed class BuildPlanningService(
             }
             if (p.HasCommands) labels.Add("task");
             return new BuildJob(p.Key, p.TaskName, p.Description, p.Order, p.DependsOn, p.TaskVars,
-                labels.Distinct().ToList(), p.Artifacts, p.HasCommands, approval, p.Deploy);
+                labels.Distinct().ToList(), p.Artifacts, p.HasCommands, approval, p.Deploy, p.Secrets);
         }).ToList();
     }
 }

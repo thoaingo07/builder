@@ -13,6 +13,7 @@ public static class AgentHubNames
     public const string JobLog = nameof(JobLog);
     public const string JobCompleted = nameof(JobCompleted);
     public const string CleanupCompleted = nameof(CleanupCompleted);
+    public const string GetJobSecrets = nameof(GetJobSecrets);
     public const string TeardownCompleted = nameof(TeardownCompleted);
 
     // server → agent
@@ -95,7 +96,8 @@ public sealed record JobAssignment(
     Dictionary<string, string> Env,
     string[] UploadArtifacts,
     ArtifactRef[] DownloadArtifacts,
-    DeployTarget? Deploy);
+    DeployTarget? Deploy,
+    string[] Secrets);
 
 public sealed record JobResult(Guid JobId, bool Succeeded, int ExitCode, string? Error, bool Canceled);
 
