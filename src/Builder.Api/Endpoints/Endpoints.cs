@@ -74,6 +74,8 @@ public static class Endpoints
         api.MapPut("/pipelines/{id:guid}/taskfile", (Guid id, SaveTaskfileInput input, ClaimsPrincipal u, PipelineService s, CancellationToken ct) =>
             s.SaveTaskfileAsync(id, input, u.UserName(), ct));
         api.MapPost("/pipelines/plan", (PlanRequest request, PipelineService s) => s.Preview(request));
+        api.MapGet("/pipelines/{id:guid}/inputs", (Guid id, string? branch, string? entryTask, PipelineService s, CancellationToken ct) =>
+            s.InputsAsync(id, branch, entryTask, ct));
         api.MapPost("/pipelines/{id:guid}/builds", (Guid id, QueueBuildInput input, ClaimsPrincipal u, BuildService s, CancellationToken ct) =>
             s.QueueAsync(id, input, u.UserName(), ct));
 

@@ -84,6 +84,16 @@ public sealed class PipelineService(
         return new TaskfileDto(p.TaskfilePath, b, commit, input.Content);
     }
 
+    /// <summary>What the Run dialog must ask for: requires.vars of every task the runner's entry reaches, at that branch.</summary>
+    public async Task<RunInputsDto> InputsAsync(Guid id, string? branch, string? entryTask, CancellationToken ct)
+    {
+        var (p, _) = await WithRepositoryAsync(id, ct);
+        var taskfile = await GetTaskfileAsync(id, branch, ct);
+        var plan = planner.Plan(taskfile.Content, string.IsNullOrWhiteSpace(entryTask) ? p.EntryTask : entryTask);
+        return new RunInputsDto(taskfile.Branch, plan.EntryTask,
+            plan.Inputs.Select(i => new RunInputDto(i.Input.Name, i.Input.Enum, i.RequiredBy.ToList())).ToList());
+    }
+
     public PlanPreviewDto Preview(PlanRequest request)
     {
         try

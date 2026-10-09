@@ -12,6 +12,7 @@ public static class AgentHubNames
     public const string JobStarted = nameof(JobStarted);
     public const string JobLog = nameof(JobLog);
     public const string JobCompleted = nameof(JobCompleted);
+    public const string JobStepStarted = nameof(JobStepStarted);
     public const string CleanupCompleted = nameof(CleanupCompleted);
     public const string GetJobSecrets = nameof(GetJobSecrets);
     public const string GetJobCredentials = nameof(GetJobCredentials);
@@ -56,7 +57,7 @@ public sealed record AgentMetrics(
 
 public enum LogStream { Out, Err, System }
 
-public sealed record LogChunk(DateTimeOffset Timestamp, LogStream Stream, string Text);
+public sealed record LogChunk(DateTimeOffset Timestamp, LogStream Stream, string Text, int? Step = null);
 
 /// <summary>What to fetch. Credentials are not part of the assignment: the agent asks for them when the job starts.</summary>
 public sealed record GitSource(string Url, string Branch, string Commit);

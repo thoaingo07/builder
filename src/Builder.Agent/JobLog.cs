@@ -28,6 +28,9 @@ public sealed partial class JobLog : IAsyncDisposable
         values.Where(s => !string.IsNullOrWhiteSpace(s) && s!.Length >= 4)
             .SelectMany(s => s!.Split('\n').Select(l => l.Trim()).Where(l => l.Length >= 4).Append(s!));
 
+    /// <summary>The step subsequent lines belong to (set from the step markers).</summary>
+    public int? Step { get; set; }
+
     public void Out(string text) => Write(LogStream.Out, text);
     public void Err(string text) => Write(LogStream.Err, text);
     public void System(string text) => Write(LogStream.System, text);
@@ -36,7 +39,7 @@ public sealed partial class JobLog : IAsyncDisposable
     {
         text = Ansi().Replace(text, "");
         foreach (var s in _secrets) text = text.Replace(s, "***");
-        _channel.Writer.TryWrite(new LogChunk(DateTimeOffset.UtcNow, stream, text));
+        _channel.Writer.TryWrite(new LogChunk(DateTimeOffset.UtcNow, stream, text, Step));
     }
 
     private async Task PumpAsync()

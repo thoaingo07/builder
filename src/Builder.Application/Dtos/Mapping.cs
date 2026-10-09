@@ -31,11 +31,11 @@ public static class Mapping
         j.Id, j.BuildId, j.Key, j.TaskName, j.Description, j.Order, j.DependsOn, j.Labels, j.Artifacts, j.Secrets, j.Status,
         j.AgentId, j.AgentName, j.ExitCode, j.Error, j.StartedAt, j.FinishedAt,
         j.Approval is null ? null : new ApprovalDto(j.Approval.Message, j.Approval.Approvers, j.ApprovedBy, j.ApprovedAt, j.ApprovalComment),
-        j.Deploy);
+        j.Deploy, j.Steps);
 
     public static ArtifactDto ToDto(this Artifact a) => new(a.Id, a.JobId, a.Name, a.SizeBytes, a.CreatedAt);
 
-    public static LogLineDto ToDto(this LogLine l) => new(l.Id, l.JobId, l.Timestamp, l.Stream, l.Text);
+    public static LogLineDto ToDto(this LogLine l) => new(l.Id, l.JobId, l.Timestamp, l.Stream, l.Text, l.Step);
 
     public static AgentDto ToDto(this Agent a, AgentMetricsDto? metrics, List<AgentRunningJobDto> running) => new(
         a.Id, a.OrgId is null, a.Name, a.HostName, a.Os, a.Version, a.Capacity, a.Labels, a.Enabled, a.Online, a.LastSeenAt, metrics, running);

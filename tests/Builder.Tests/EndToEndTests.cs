@@ -259,6 +259,53 @@ public sealed class EndToEndTests(AspireFixture aspire) : IDisposable
     }
 
     [Fact]
+    public async Task Steps_and_run_inputs_are_tracked_live()
+    {
+        var repo = CreateRepository(new()
+        {
+            [".builder/runners/release.yml"] = """
+                version: '3'
+                tasks:
+                  helper:
+                    cmds:
+                      - echo "helper sees DB={{.DB}}"
+                  default:
+                    requires:
+                      vars: [VERSION, { name: TARGET, enum: [staging, prod] }]
+                    cmds:
+                      - echo "building {{.VERSION}} for {{.TARGET}}"
+                      - task: helper
+                        vars: { DB: orders }
+                      - sh -c 'echo step three fails; exit 3'
+                      - echo never
+                """,
+        });
+        using var http = await LoginAsync();
+        var runner = await E2E.MapRunnerAsync(http, repo, ".builder/runners/release.yml");
+
+        var inputs = await E2E.GetAsync(http, $"/api/pipelines/{runner}/inputs");
+        Assert.Equal(["VERSION", "TARGET"], inputs["inputs"]!.AsArray().Select(i => i!["name"]!.GetValue<string>()));
+        Assert.Equal(["staging", "prod"], inputs["inputs"]![1]!["enum"]!.AsArray().Select(e => e!.GetValue<string>()));
+
+        var missing = await E2E.RunBuildAsync(http, runner);
+        Assert.Contains("VERSION (required by default)", missing["error"]!.GetValue<string>());
+
+        var build = await E2E.RunBuildAsync(http, runner, new { variables = new Dictionary<string, string> { ["VERSION"] = "1.2", ["TARGET"] = "prod" } });
+        var job = build["jobs"]![0]!;
+        Assert.Equal("Failed", build["status"]!.GetValue<string>());
+        Assert.Equal(["Succeeded", "Succeeded", "Failed", "Skipped"], job["steps"]!.AsArray().Select(s => s!["status"]!.GetValue<string>()));
+        Assert.Equal("task: helper", job["steps"]![1]!["label"]!.GetValue<string>());
+        Assert.Equal("orders", job["steps"]![1]!["vars"]!["DB"]!.GetValue<string>());
+
+        var logs = (await http.GetFromJsonAsync<JsonArray>($"/api/builds/{build["id"]}/jobs/{job["id"]}/logs"))!;
+        int? StepOf(string text) => logs.First(l => l!["text"]!.GetValue<string>().Contains(text))!["step"]?.GetValue<int>();
+        Assert.Equal(0, StepOf("building 1.2 for prod"));
+        Assert.Equal(1, StepOf("helper sees DB=orders"));
+        Assert.Equal(2, StepOf("step three fails"));
+        Assert.DoesNotContain(logs, l => l!["text"]!.GetValue<string>().Contains("::builder-step::"));
+    }
+
+    [Fact]
     public async Task Cancel_stops_a_running_build()
     {
         var repo = CreateRepository(new() { [".builder/runners/slow.yml"] = "version: '3'\ntasks:\n  default:\n    cmds:\n      - sleep 120\n" });

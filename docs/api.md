@@ -87,12 +87,24 @@ type JobDto = {
   agentId: string|null; agentName: string|null; exitCode: number|null; error: string|null
   startedAt: string|null; finishedAt: string|null
   approval: ApprovalDto|null; deploy: DeploySpecDto|null
+  steps: JobStepDto[]          // the task's cmds, in order, with live status
 }
+type StepKind = 'Command'|'TaskCall'|'Defer'
+type StepStatus = 'Pending'|'Running'|'Succeeded'|'Failed'|'Skipped'
+type JobStepDto = {
+  index: number; kind: StepKind
+  label: string                // first line of the command, "task: <name>", "for each: <cmd>", "defer: …"
+  vars: Record<string,string>|null   // TaskCall: the vars passed to the called task
+  status: StepStatus; startedAt: string|null; finishedAt: string|null
+}
+type RunInputDto = { name: string; enum: string[]|null; requiredBy: string[] }   // go-task requires.vars
+type RunInputsDto = { branch: string; entryTask: string; inputs: RunInputDto[] }
 type ArtifactDto = { id; jobId; name; sizeBytes: number; createdAt }
 type BuildDetailDto = BuildSummaryDto & {
   variables: Record<string,string>; jobs: JobDto[]; artifacts: ArtifactDto[]; deployments: DeploymentDto[]
 }
-type LogLineDto = { id: number; jobId: string; timestamp: string; stream: 'Out'|'Err'|'System'; text: string }
+type LogLineDto = { id: number; jobId: string; timestamp: string; stream: 'Out'|'Err'|'System'; text: string
+  step: number|null }          // index into JobDto.steps; null = setup before the first step
 
 type AgentMetricsDto = {
   at: string; cpuPercent: number; cpuCount: number; memoryTotalBytes: number; memoryUsedBytes: number
@@ -165,6 +177,7 @@ Current organization (`X-Org` required):
 | GET | `/pipelines/{id}/taskfile?branch=` | `TaskfileDto` (404 if the file isn't on that branch) | |
 | PUT | `/pipelines/{id}/taskfile` | `{ branch, content, message }` → `TaskfileDto` (commit + push) | |
 | POST | `/pipelines/plan` | `{ content, entryTask? }` → `PlanPreviewDto` | |
+| GET | `/pipelines/{id}/inputs?branch=&entryTask=` | `RunInputsDto` (variables the Run dialog must ask for; a build without them fails planning) | |
 | POST | `/pipelines/{id}/builds` | `{ branch?, entryTask?, variables? }` → `BuildSummaryDto` | |
 | GET/POST | `/secrets` | `SecretDto[]` / `SecretInput` → `SecretDto` (name `^[A-Z][A-Z0-9_]*$`, unique) | /Admin |
 | PUT/DELETE | `/secrets/{id}` | `SecretInput` → `SecretDto` / 204 | Admin |

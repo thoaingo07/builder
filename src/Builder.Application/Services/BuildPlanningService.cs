@@ -40,6 +40,7 @@ public sealed class BuildPlanningService(
                 ?? throw new TaskfileException($"'{pipeline.TaskfilePath}' was not found at {commit[..Math.Min(8, commit.Length)]}.");
             var plan = planner.Plan(yaml, string.IsNullOrEmpty(build.EntryTask) ? pipeline.EntryTask : build.EntryTask);
             entry = plan.EntryTask;
+            CheckInputs(plan, build.Variables);
             jobs = await ToJobsAsync(plan, build.OrgId, pipeline.RepositoryId, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -70,6 +71,20 @@ public sealed class BuildPlanningService(
         await db.Repositories.AsNoTracking().IgnoreQueryFilters().Where(r => r.Id == repositoryId && r.OrgId == orgId)
             .Join(db.Connections.IgnoreQueryFilters(), r => r.ConnectionId, c => c.Id, (r, c) => c.Type)
             .AnyAsync(t => t == Domain.Connections.ConnectionType.AzureDevOps, ct);
+
+    /// <summary>Every requires.vars input must be given (and, with an enum, be one of its values).</summary>
+    public static void CheckInputs(TaskfilePlan plan, IReadOnlyDictionary<string, string> variables)
+    {
+        var problems = new List<string>();
+        foreach (var (input, requiredBy) in plan.Inputs)
+        {
+            if (!variables.TryGetValue(input.Name, out var value) || string.IsNullOrEmpty(value))
+                problems.Add($"{input.Name} (required by {string.Join(", ", requiredBy)})");
+            else if (input.Enum is { } allowed && !allowed.Contains(value))
+                problems.Add($"{input.Name}='{value}' is not one of: {string.Join(", ", allowed)}");
+        }
+        if (problems.Count > 0) throw new TaskfileException("Missing or invalid variables: " + string.Join("; ", problems));
+    }
 
     private async Task<List<BuildJob>> ToJobsAsync(TaskfilePlan plan, Guid orgId, Guid repositoryId, CancellationToken ct)
     {
@@ -112,7 +127,7 @@ public sealed class BuildPlanningService(
             }
             if (p.HasCommands) labels.Add("task");
             return new BuildJob(p.Key, p.TaskName, p.Description, p.Order, p.DependsOn, p.TaskVars,
-                labels.Distinct().ToList(), p.Artifacts, p.HasCommands, approval, p.Deploy, p.Secrets, p.Registries, p.AzureArtifacts);
+                labels.Distinct().ToList(), p.Artifacts, p.HasCommands, approval, p.Deploy, p.Secrets, p.Registries, p.AzureArtifacts, p.Steps);
         }).ToList();
     }
 }

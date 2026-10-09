@@ -129,7 +129,58 @@ public sealed class TaskfilePlanner : ITaskfilePlanner
             throw new TaskfileException($"Task '{name}': x-registries must be a list.");
         var azureArtifacts = m is not null && Get(m, "x-azure-artifacts") is { } aa && IsTrue(aa);
 
-        return new PlannedJob(key, name, desc, order, deps, vars, labels, artifacts, hasCommands, approval, deploy, secrets, registries, azureArtifacts);
+        return new PlannedJob(key, name, desc, order, deps, vars, labels, artifacts, hasCommands, approval, deploy, secrets, registries, azureArtifacts,
+            StepsOf(node), InputsOf(m));
+    }
+
+    /// <summary>The task's cmds as steps (shorthand tasks included).</summary>
+    public static List<JobStep> StepsOf(YamlNode node)
+    {
+        var cmds = node switch
+        {
+            YamlScalarNode s when !string.IsNullOrWhiteSpace(s.Value) => [s],
+            YamlSequenceNode seq => seq.Children.ToList(),
+            YamlMappingNode m when Get(m, "cmds") is YamlSequenceNode seq => seq.Children.ToList(),
+            YamlMappingNode m when Get(m, "cmd") is { } single => [single],
+            _ => new List<YamlNode>(),
+        };
+        var steps = new List<JobStep>();
+        foreach (var c in cmds)
+        {
+            var index = steps.Count;
+            steps.Add(c switch
+            {
+                YamlScalarNode s => new JobStep(index, StepKind.Command, Label(s.Value), null),
+                YamlMappingNode m when Scalar(Get(m, "task")) is { } task =>
+                    new JobStep(index, StepKind.TaskCall, $"task: {task}", Get(m, "vars") is YamlMappingNode vm
+                        ? vm.Children.Where(kv => Scalar(kv.Value) is not null).ToDictionary(kv => Scalar(kv.Key)!, kv => Scalar(kv.Value)!)
+                        : null),
+                YamlMappingNode m when Get(m, "defer") is { } d =>
+                    new JobStep(index, StepKind.Defer, "defer: " + (d is YamlMappingNode dm ? Scalar(Get(dm, "task")) is { } t ? $"task: {t}" : Label(Scalar(Get(dm, "cmd"))) : Label(Scalar(d))), null),
+                YamlMappingNode m when Get(m, "for") is not null => new JobStep(index, StepKind.Command, "for each: " + Label(Scalar(Get(m, "cmd"))), null),
+                YamlMappingNode m => new JobStep(index, StepKind.Command, Label(Scalar(Get(m, "cmd"))), null),
+                _ => new JobStep(index, StepKind.Command, "(step)", null),
+            });
+        }
+        return steps;
+
+        static string Label(string? cmd)
+        {
+            var first = (cmd ?? "").Trim().Split('\n')[0].Trim();
+            return first.Length > 120 ? first[..117] + "..." : first.Length == 0 ? "(empty)" : first;
+        }
+    }
+
+    /// <summary>go-task <c>requires: { vars: [A, { name: B, enum: [x, y] }] }</c>.</summary>
+    private static List<InputSpec> InputsOf(YamlMappingNode? m)
+    {
+        if (m is null || Get(m, "requires") is not YamlMappingNode r || Get(r, "vars") is not YamlSequenceNode vars) return [];
+        return vars.Children.Select(v => v switch
+        {
+            YamlScalarNode s when !string.IsNullOrWhiteSpace(s.Value) => new InputSpec(s.Value!.Trim(), null),
+            YamlMappingNode vm when Scalar(Get(vm, "name")) is { } n => new InputSpec(n.Trim(), Strings(Get(vm, "enum")).ToList() is { Count: > 0 } e ? e : null),
+            _ => null,
+        }).OfType<InputSpec>().ToList();
     }
 
     private static IEnumerable<(string Name, Dictionary<string, string> Vars)> DepsOf(YamlNode node)

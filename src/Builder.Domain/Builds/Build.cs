@@ -136,6 +136,8 @@ public sealed class Build : IOrgScoped
 
     public void JobStarted(Guid jobId, DateTimeOffset now) => Job(jobId).Start(now);
 
+    public void StepStarted(Guid jobId, int index, DateTimeOffset now) => Job(jobId).StepStarted(index, now);
+
     public void JobCompleted(Guid jobId, bool succeeded, bool canceled, int? exitCode, string? error, DateTimeOffset now)
     {
         var job = Job(jobId);

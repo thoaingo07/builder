@@ -82,6 +82,7 @@ public sealed class AgentHub(AgentService agents, SecretService secrets, Credent
 
     public Task Heartbeat(AgentMetrics metrics) => agents.HeartbeatAsync(AgentId, metrics, Context.ConnectionAborted);
     public Task JobStarted(Guid jobId) => agents.JobStartedAsync(jobId, Context.ConnectionAborted);
+    public Task JobStepStarted(Guid jobId, int index) => agents.StepStartedAsync(jobId, index, Context.ConnectionAborted);
     public Task JobLog(Guid jobId, List<LogChunk> lines) => agents.JobLogAsync(jobId, lines, Context.ConnectionAborted);
     public Task JobCompleted(JobResult result) => agents.JobCompletedAsync(result, CancellationToken.None);
     public Task TeardownCompleted(TeardownResult result) => agents.TeardownCompletedAsync(result, CancellationToken.None);

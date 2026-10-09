@@ -117,12 +117,22 @@ public sealed class AgentService(
         await events.PublishAsync(build, [build.Job(jobId)], ct);
     }
 
+    public async Task StepStartedAsync(Guid jobId, int index, CancellationToken ct)
+    {
+        using var _ = await buildLock.AcquireAsync(ct);
+        var build = await BuildOfJobAsync(jobId, ct);
+        if (build is null) return;
+        build.StepStarted(jobId, index, clock.UtcNow);
+        await db.SaveChangesAsync(ct);
+        await events.PublishAsync(build, [build.Job(jobId)], ct);
+    }
+
     public async Task JobLogAsync(Guid jobId, IReadOnlyList<LogChunk> chunks, CancellationToken ct)
     {
         var buildId = await db.BuildJobs.Where(j => j.Id == jobId).Select(j => (Guid?)j.BuildId).FirstOrDefaultAsync(ct);
         if (buildId is null || chunks.Count == 0) return;
         var lines = chunks.Select(c => new LogLine(buildId.Value, jobId, c.Timestamp, (LogStreamKind)c.Stream,
-            c.Text.Length > 8000 ? c.Text[..8000] : c.Text)).ToList();
+            c.Text.Length > 8000 ? c.Text[..8000] : c.Text, c.Step)).ToList();
         db.LogLines.AddRange(lines);
         await db.SaveChangesAsync(ct);
         await ui.Log(buildId.Value, lines.Select(l => l.ToDto()).ToList());

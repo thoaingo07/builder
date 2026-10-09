@@ -20,7 +20,7 @@ public sealed record JobDto(
     Guid Id, Guid BuildId, string Key, string TaskName, string? Description, int Order, List<string> DependsOn,
     List<string> Labels, List<string> Artifacts, List<string> Secrets, JobStatus Status, Guid? AgentId, string? AgentName,
     int? ExitCode, string? Error, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt,
-    ApprovalDto? Approval, DeploySpec? Deploy);
+    ApprovalDto? Approval, DeploySpec? Deploy, List<JobStep> Steps);
 
 public sealed record ArtifactDto(Guid Id, Guid JobId, string Name, long SizeBytes, DateTimeOffset CreatedAt);
 
@@ -30,7 +30,11 @@ public sealed record BuildDetailDto(
     DateTimeOffset QueuedAt, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, JobCounts JobCounts,
     Dictionary<string, string> Variables, List<JobDto> Jobs, List<ArtifactDto> Artifacts, List<DeploymentDto> Deployments);
 
-public sealed record LogLineDto(long Id, Guid JobId, DateTimeOffset Timestamp, LogStreamKind Stream, string Text);
+public sealed record LogLineDto(long Id, Guid JobId, DateTimeOffset Timestamp, LogStreamKind Stream, string Text, int? Step);
+
+/// <summary>A variable a runner needs at run time (requires.vars), for the Run dialog.</summary>
+public sealed record RunInputDto(string Name, List<string>? Enum, List<string> RequiredBy);
+public sealed record RunInputsDto(string Branch, string EntryTask, List<RunInputDto> Inputs);
 
 /// <summary>A runner: one mapped file from a repository's .builder/runners folder.</summary>
 public sealed record PipelineDto(

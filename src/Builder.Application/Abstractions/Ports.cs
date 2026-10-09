@@ -74,9 +74,20 @@ public sealed record PlannedJob(
     DeploySpec? Deploy,
     IReadOnlyList<string> Secrets,
     IReadOnlyList<RegistrySpec> Registries,
-    bool AzureArtifacts);
+    bool AzureArtifacts,
+    IReadOnlyList<JobStep> Steps,
+    IReadOnlyList<InputSpec> Inputs);
 
-public sealed record TaskfilePlan(string EntryTask, IReadOnlyList<PlannedJob> Jobs);
+public sealed record TaskfilePlan(string EntryTask, IReadOnlyList<PlannedJob> Jobs)
+{
+    /// <summary>Variables the run needs (requires.vars of every task in the graph), merged by name.</summary>
+    public IReadOnlyList<(InputSpec Input, IReadOnlyList<string> RequiredBy)> Inputs =>
+        Jobs.SelectMany(j => j.Inputs.Select(i => (i, j.TaskName)))
+            .GroupBy(x => x.i.Name)
+            .Select(g => (new InputSpec(g.Key, g.Select(x => x.i.Enum).FirstOrDefault(e => e is { Count: > 0 })),
+                (IReadOnlyList<string>)g.Select(x => x.TaskName).Distinct().ToList()))
+            .ToList();
+}
 
 public interface ITaskfilePlanner
 {

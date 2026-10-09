@@ -71,7 +71,11 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
                 env["SYSTEM_ACCESSTOKEN"] = adoToken;      // same name Azure Pipelines uses
             }
 
-            derivedTaskfile = workspace.PrepareTaskfile(job.TaskfilePath, job.TaskName, job.JobId);
+            // per-job random marker: a script printing "::builder-step::" can't move the step pointer
+            // step reports go out in order and are all delivered before the job's result
+            var stepReports = Task.CompletedTask;
+            var marker = $"::builder-step::{Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(8))}::";
+            derivedTaskfile = workspace.PrepareTaskfile(job.TaskfilePath, job.TaskName, job.JobId, marker);
             List<string> args = ["--dir", workspace.Source, "--taskfile", derivedTaskfile, "--yes", "--color=false", job.TaskName];
             args.AddRange(job.TaskVars.Select(kv => $"{kv.Key}={kv.Value}"));
             // secrets only through the environment: go-task exposes them as {{.NAME}} too, and they never show up in `ps`
@@ -80,7 +84,18 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
 
             // go-task echoes each command as "task: [name] cmd" on stderr; show those as step markers, not errors
             var exit = await ProcessRunner.RunAsync(options.TaskBinary, args, workspace.Source, env,
-                (stream, line) => log.Write(line.StartsWith("task: ", StringComparison.Ordinal) ? LogStream.System : stream, line), ct);
+                (stream, line) =>
+                {
+                    if (stream == LogStream.Out && line.StartsWith(marker, StringComparison.Ordinal)
+                        && int.TryParse(line.AsSpan(marker.Length), out var step))
+                    {
+                        log.Step = step;
+                        stepReports = stepReports.ContinueWith(_ => server.StepStartedAsync(job.JobId, step), TaskScheduler.Default).Unwrap();
+                        return;
+                    }
+                    log.Write(line.StartsWith("task: ", StringComparison.Ordinal) ? LogStream.System : stream, line);
+                }, ct);
+            try { await stepReports; } catch { /* best effort: the build still finishes */ }
             if (exit != 0) return Fail(log, job, exit, $"task '{job.TaskName}' exited with code {exit}");
 
             if (deployer is not null)
@@ -141,4 +156,5 @@ public interface IServerChannel
     Task SendLogAsync(Guid jobId, List<LogChunk> lines);
     Task<Dictionary<string, string>> GetJobSecretsAsync(Guid jobId);
     Task<JobCredentials> GetJobCredentialsAsync(Guid jobId);
+    Task StepStartedAsync(Guid jobId, int index);
 }

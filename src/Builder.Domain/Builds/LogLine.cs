@@ -10,11 +10,14 @@ public sealed class LogLine
     public DateTimeOffset Timestamp { get; private set; }
     public LogStreamKind Stream { get; private set; }
     public string Text { get; private set; } = "";
+    /// <summary>Index of the step the line belongs to; null before the first step (checkout, setup).</summary>
+    public int? Step { get; private set; }
 
     private LogLine() { }
 
-    public LogLine(Guid buildId, Guid jobId, DateTimeOffset timestamp, LogStreamKind stream, string text)
+    public LogLine(Guid buildId, Guid jobId, DateTimeOffset timestamp, LogStreamKind stream, string text, int? step = null)
     {
+        Step = step;
         BuildId = buildId;
         JobId = jobId;
         Timestamp = timestamp;

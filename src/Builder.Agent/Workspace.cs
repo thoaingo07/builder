@@ -66,7 +66,9 @@ public sealed class Workspace
     /// Writes a copy of the Taskfile next to the original with the job's own <c>deps</c> removed (Builder already
     /// ran them, possibly on other agents) and returns its path.
     /// </summary>
-    public string PrepareTaskfile(string taskfilePath, string taskName, Guid jobId)
+    /// <param name="stepMarker">When set, a silent <c>echo {stepMarker}{i}</c> is inserted before every step i of the
+    /// task (not before defers), so the agent can tell which step is running.</param>
+    public string PrepareTaskfile(string taskfilePath, string taskName, Guid jobId, string? stepMarker = null)
     {
         var original = Path.GetFullPath(Path.Combine(Source, taskfilePath));
         if (!original.StartsWith(Source, StringComparison.Ordinal) || !File.Exists(original))
@@ -76,8 +78,29 @@ public sealed class Workspace
         using (var reader = new StreamReader(original)) yaml.Load(reader);
         var root = (YamlMappingNode)yaml.Documents[0].RootNode;
         var tasks = (YamlMappingNode)root.Children[new YamlScalarNode("tasks")];
-        if (tasks.Children.TryGetValue(new YamlScalarNode(taskName), out var task) && task is YamlMappingNode m)
+        var key = new YamlScalarNode(taskName);
+        if (tasks.Children.TryGetValue(key, out var task))
+        {
+            // shorthand tasks ("t: echo hi" / "t: [a, b]") become mappings so they can be edited
+            var m = task as YamlMappingNode ?? new YamlMappingNode(new YamlScalarNode("cmds"),
+                task is YamlSequenceNode seq ? seq : new YamlSequenceNode(task));
+            tasks.Children[key] = m;
             m.Children.Remove(new YamlScalarNode("deps"));
+            if (stepMarker is not null && m.Children.TryGetValue(new YamlScalarNode("cmds"), out var cmds) && cmds is YamlSequenceNode list)
+            {
+                var marked = new YamlSequenceNode();
+                for (var i = 0; i < list.Children.Count; i++)
+                {
+                    var step = list.Children[i];
+                    if (step is not YamlMappingNode sm || !sm.Children.ContainsKey(new YamlScalarNode("defer")))
+                        marked.Add(new YamlMappingNode(
+                            new YamlScalarNode("cmd"), new YamlScalarNode($"echo '{stepMarker}{i}'"),
+                            new YamlScalarNode("silent"), new YamlScalarNode("true")));
+                    marked.Add(step);
+                }
+                m.Children[new YamlScalarNode("cmds")] = marked;
+            }
+        }
 
         var derived = Path.Combine(Path.GetDirectoryName(original)!, $".builder-{jobId:N}.Taskfile.yml");
         using (var writer = new StreamWriter(derived)) yaml.Save(writer, assignAnchors: false);
