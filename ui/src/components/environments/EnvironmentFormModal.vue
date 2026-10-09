@@ -21,7 +21,7 @@ const saving = ref(false)
 const env = computed(() => props.environment)
 
 const typeItems = [
-  { label: 'VPS · SSH + Docker Compose', value: 'SshDocker', icon: 'i-lucide-server' },
+  { label: 'VPS · SSH + Compose (Docker or Podman)', value: 'SshDocker', icon: 'i-lucide-server' },
   { label: 'Kubernetes / AKS', value: 'Kubernetes', icon: 'i-lucide-ship-wheel' },
 ]
 const k8sModes = [

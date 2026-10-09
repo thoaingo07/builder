@@ -73,7 +73,17 @@ public sealed class Deployer(DeployTarget target, string tempDir, string workRoo
         if (target.Namespace is { } ns) _env["DEPLOY_NAMESPACE"] = ns;
     }
 
-    /// <summary>The built-in deploy: docker compose over SSH, or kubectl apply. No-op when neither is configured.</summary>
+    /// <summary>
+    /// Shell prefix that picks the compose tool on the remote host and stores it in $C:
+    /// Docker Compose v2, else podman-compose, else `podman compose`.
+    /// </summary>
+    internal const string RemoteCompose =
+        "if docker compose version >/dev/null 2>&1; then C='docker compose'; " +
+        "elif command -v podman-compose >/dev/null 2>&1; then C='podman-compose'; " +
+        "elif podman compose version >/dev/null 2>&1; then C='podman compose'; " +
+        "else echo 'No docker compose / podman-compose on the host' >&2; exit 127; fi; echo \"using $C\"; ";
+
+    /// <summary>The built-in deploy: compose over SSH (Docker or Podman host), or kubectl apply. No-op when neither is configured.</summary>
     public async Task<int> DeployAsync(string sourceDir, JobLog log, CancellationToken ct)
     {
         if (target.Type == DeployTargetType.SshDocker)
@@ -84,13 +94,13 @@ public sealed class Deployer(DeployTarget target, string tempDir, string workRoo
             if (!File.Exists(compose)) { log.Err($"Compose file '{target.ComposeFile}' not found"); return 1; }
             var remoteDir = $"builder/{project}";
 
-            log.System($"Deploying '{project}' to {Destination} with docker compose");
+            log.System($"Deploying '{project}' to {Destination} with compose");
             var code = await Ssh($"mkdir -p {remoteDir}", log, ct);
             if (code != 0) return code;
             code = await ProcessRunner.RunAsync("scp", [.. ScpOptions(), compose, $"{Destination}:{remoteDir}/docker-compose.yml"],
                 sourceDir, null, log.Write, ct);
             if (code != 0) return code;
-            return await Ssh($"cd {remoteDir} && docker compose -p {project} up -d --pull always --remove-orphans", log, ct);
+            return await Ssh($"{RemoteCompose}cd {remoteDir} && ($C -p {project} -f docker-compose.yml pull || echo 'pull failed - using local images') && $C -p {project} -f docker-compose.yml up -d", log, ct);
         }
 
         if (target.Manifests is null) return 0;
@@ -116,7 +126,8 @@ public sealed class Deployer(DeployTarget target, string tempDir, string workRoo
         if (target.Type == DeployTargetType.SshDocker)
         {
             code = await ProcessRunner.RunAsync("ssh", [.. SshOptions(), Destination,
-                $"docker compose -p {target.Project} down --remove-orphans && rm -rf builder/{target.Project}"], tempDir, null, Collect, ct);
+                $"{RemoteCompose}cd builder/{target.Project} && $C -p {target.Project} -f docker-compose.yml down && cd && rm -rf builder/{target.Project}"],
+                tempDir, null, Collect, ct);
         }
         else
         {

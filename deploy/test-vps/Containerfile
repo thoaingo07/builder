@@ -1,0 +1,11 @@
+# A stand-in "VPS" for deploy tests: sshd (key auth only) + docker CLI with the compose plugin.
+# Mount the host's Podman/Docker socket at /var/run/docker.sock; deployed apps then run as real
+# sibling containers. Pass the public key to accept in AUTHORIZED_KEY.
+FROM docker.io/library/alpine:3.22
+RUN apk add --no-cache openssh-server docker-cli docker-cli-compose bash \
+ && sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/; s/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config \
+ && passwd -u root 2>/dev/null || true
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+EXPOSE 22
+ENTRYPOINT ["/entrypoint.sh"]

@@ -6,11 +6,11 @@ pipelines written as [go-task](https://taskfile.dev) Taskfiles.
 - Checkout from Azure DevOps Git (or any git URL)
 - Taskfile `deps` run **in parallel across agents**, `cmds` run in sequence
 - Approval gates (`x-approval`) and per-environment approvals
-- Deploy to a VPS over SSH with Docker Compose, or to Kubernetes / AKS (`x-deploy`)
+- Deploy to a VPS over SSH with Docker **or Podman** compose, or to Kubernetes / AKS (`x-deploy`)
 - Live UI: builds, logs, agent CPU / RAM / disk, cancel, re-run, clean up, visual Taskfile editor
 - Clean Architecture, PostgreSQL (raw SQL migrations via FluentMigrator), BFF in front of the SPA
 
-Docs: [design](docs/design.md) · [API](docs/api.md) · [migrations](db/README.md) · [sample pipeline](samples/Taskfile.yml)
+Docs: [design](docs/design.md) · [API](docs/api.md) · [migrations](db/README.md) · [sample pipeline](samples/Taskfile.yml) · [dev host on Podman](docs/ops/dev-host-podman.md)
 
 ## Run it
 
@@ -61,7 +61,9 @@ task test
 
 Unit tests (Taskfile planner, build state machine) plus integration tests that start the real stack through
 **Aspire** (`Aspire.Hosting.Testing`): migrations up/down on PostgreSQL, the EF mapping against the SQL schema,
-and end-to-end builds through BFF → API → two agents (parallel jobs, artifacts, approval, cancel).
+and end-to-end builds through BFF → API → two agents (parallel jobs, artifacts, approval, cancel), plus a real
+SSH deploy / redeploy / destroy against a throwaway VPS container. Containers run on **Podman** when it is
+installed (`ASPIRE_CONTAINER_RUNTIME` overrides).
 
 ## Writing a pipeline
 

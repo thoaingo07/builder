@@ -4,8 +4,13 @@
 //   Builder:Profile = db       → PostgreSQL only (database tests)
 //   Builder:Profile = backend  → PostgreSQL, migrator, API, BFF, two agents (end-to-end tests)
 //   Builder:Ephemeral = true   → no data volume, data under a temp directory (tests)
+//   Builder:TestVpsAuthorizedKey = <ssh public key> → adds the "vps" container for deploy tests
 //
 // The secrets below are for local use only; real deployments use deploy/compose.yml and its .env.
+
+// Containers run on Podman when it is installed (this project's default), unless ASPIRE_CONTAINER_RUNTIME says otherwise.
+if (Environment.GetEnvironmentVariable("ASPIRE_CONTAINER_RUNTIME") is null && OnPath("podman"))
+    Environment.SetEnvironmentVariable("ASPIRE_CONTAINER_RUNTIME", "podman");
 
 var builder = DistributedApplication.CreateBuilder(args);
 
@@ -63,6 +68,15 @@ foreach (var name in new[] { "agent-1", "agent-2" })
         .WithEnvironment("Agent__WorkDirectory", Path.Combine(dataRoot, name));
 }
 
+// Deploy tests: a stand-in VPS (sshd + compose CLI) that drives this machine's Podman/Docker through its socket.
+if (builder.Configuration["Builder:TestVpsAuthorizedKey"] is { Length: > 0 } authorizedKey)
+{
+    builder.AddDockerfile("vps", "../../deploy/test-vps", "Containerfile")
+        .WithEnvironment("AUTHORIZED_KEY", authorizedKey)
+        .WithBindMount(ContainerSocket(), "/var/run/docker.sock")
+        .WithEndpoint(targetPort: 22, name: "ssh", scheme: "tcp");
+}
+
 if (profile == "full")
 {
     builder.AddViteApp("ui", "../../ui")
@@ -72,3 +86,13 @@ if (profile == "full")
 }
 
 builder.Build().Run();
+
+static string ContainerSocket() =>
+    Environment.GetEnvironmentVariable("ASPIRE_CONTAINER_RUNTIME") == "podman"
+        ? Path.Combine(Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR")
+            ?? throw new InvalidOperationException("XDG_RUNTIME_DIR is not set; cannot find the rootless Podman socket."), "podman/podman.sock")
+        : "/var/run/docker.sock";
+
+static bool OnPath(string tool) =>
+    (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)
+    .Any(dir => File.Exists(Path.Combine(dir, tool)));

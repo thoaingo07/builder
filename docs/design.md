@@ -101,7 +101,7 @@ Builder env vars available to every command: `BUILDER_BUILD_ID`, `BUILDER_BUILD_
 
 | Type | Config | Built-in action | Teardown |
 |---|---|---|---|
-| `ssh-docker` | host, port, user, private key | scp compose file → `docker compose -p <project> up -d --pull always` | `docker compose -p <project> down` |
+| `ssh-docker` (Docker **or Podman** host) | host, port, user, private key | scp compose file to `~/builder/<project>/` → `pull` (best effort) + `up -d` with the first of `docker compose`, `podman-compose`, `podman compose` found on the host | `<compose> down`, remove the folder |
 | `kubernetes` | kubeconfig **or** AKS (tenant, client id/secret, subscription, resource group, cluster) | `kubectl apply -n <namespace> -f <manifests>` | `kubectl delete namespace <namespace>` |
 
 Environments can require approval for every deploy (on top of task-level
@@ -125,6 +125,12 @@ status, logs, cancel, approve, re-run) · Pipelines (create from Azure DevOps re
 run with branch/task/vars, visual + YAML Taskfile editor that commits back to git) ·
 Agents · Environments & Deployments (open app, destroy) · Connections · Cleanup
 (old builds, artifacts, agent workspaces, docker prune).
+
+## Deploy test harness
+
+`deploy/test-vps/` is a stand-in VPS (sshd + compose CLI) that drives the local Podman/Docker through its socket.
+The Aspire AppHost adds it when `Builder:TestVpsAuthorizedKey` is set; `DeployTests` uses it to deploy, redeploy
+(supersede) and destroy a real nginx app end to end.
 
 ## Not in the MVP
 

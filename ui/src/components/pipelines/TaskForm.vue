@@ -32,7 +32,7 @@ function sync(t: tf.TaskModel) {
 watch(() => props.task.name, () => sync(props.task), { immediate: true })
 
 const otherTasks = computed(() => props.taskNames.filter(n => n !== props.task.name))
-const envItems = computed(() => props.environments.map(e => ({ label: `${e.name} · ${e.type === 'SshDocker' ? 'SSH + Docker' : 'Kubernetes'}`, value: e.name })))
+const envItems = computed(() => props.environments.map(e => ({ label: `${e.name} · ${e.type === 'SshDocker' ? 'SSH + Compose' : 'Kubernetes'}`, value: e.name })))
 const env = computed(() => props.environments.find(e => e.name === s.deployModel.environment) ?? null)
 
 const name = () => props.task.name

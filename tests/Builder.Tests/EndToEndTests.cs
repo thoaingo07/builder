@@ -158,72 +158,14 @@ public sealed class EndToEndTests(AspireFixture aspire) : IDisposable
         Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync("/api/agent/artifacts/" + Guid.NewGuid())).StatusCode);
     }
 
-    private async Task<HttpClient> LoginAsync()
-    {
-        var http = new HttpClient(new HttpClientHandler { CookieContainer = new CookieContainer() })
-        {
-            BaseAddress = aspire.App.GetEndpoint("bff", "http"),
-        };
-        http.DefaultRequestHeaders.Add("X-CSRF", "1");
-        await WaitUntilAsync(async () =>
-            (await http.PostAsJsonAsync("/bff/login", new { userName = "admin", password = "admin" })).IsSuccessStatusCode,
-            "login");
-        return http;
-    }
+    private Task<HttpClient> LoginAsync() => E2E.LoginAsync(aspire);
+    private static Task<JsonNode> PostAsync(HttpClient http, string url, object body) => E2E.PostAsync(http, url, body);
+    private static JsonNode Job(JsonNode build, string key) => E2E.Job(build, key);
+    private static string? StatusOf(JsonNode build, string key) => E2E.StatusOf(build, key);
+    private static Task WaitUntilAsync(Func<Task<bool>> condition, string what, int seconds = 90) => E2E.WaitUntilAsync(condition, what, seconds);
 
-    private static async Task<JsonNode> PostAsync(HttpClient http, string url, object body)
-    {
-        var response = await http.PostAsJsonAsync(url, body);
-        var text = await response.Content.ReadAsStringAsync();
-        Assert.True(response.IsSuccessStatusCode, $"POST {url} → {(int)response.StatusCode}: {text}");
-        return JsonNode.Parse(text)!;
-    }
-
-    private static JsonNode Job(JsonNode build, string key) =>
-        build["jobs"]!.AsArray().Single(j => j!["key"]!.GetValue<string>() == key)!;
-
-    private static string? StatusOf(JsonNode build, string key) =>
-        build["jobs"]!.AsArray().FirstOrDefault(j => j!["key"]!.GetValue<string>() == key)?["status"]!.GetValue<string>();
-
-    private static async Task WaitUntilAsync(Func<Task<bool>> condition, string what, int seconds = 90)
-    {
-        var sw = Stopwatch.StartNew();
-        while (sw.Elapsed < TimeSpan.FromSeconds(seconds))
-        {
-            try
-            {
-                if (await condition()) return;
-            }
-            catch (HttpRequestException) { /* still starting */ }
-            catch (JsonException) { }
-            await Task.Delay(500);
-        }
-        Assert.Fail($"Timed out waiting for {what}.");
-    }
-
-    private string CreateRepository(string taskfile = Taskfile, string path = "Taskfile.yml")
-    {
-        var bare = Path.Combine(_repoDir, "repo.git");
-        var work = Path.Combine(_repoDir, "work");
-        Directory.CreateDirectory(work);
-        Git(_repoDir, "init", "--quiet", "--bare", bare);
-        Git(work, "init", "--quiet", "-b", "main");
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(work, path))!);
-        File.WriteAllText(Path.Combine(work, path), taskfile);
-        Git(work, "add", "-A");
-        Git(work, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "init");
-        Git(work, "push", "--quiet", bare, "HEAD:main");
-        return bare;
-    }
-
-    private static void Git(string cwd, params string[] args)
-    {
-        var psi = new ProcessStartInfo("git") { WorkingDirectory = cwd, RedirectStandardError = true };
-        foreach (var a in args) psi.ArgumentList.Add(a);
-        using var p = Process.Start(psi)!;
-        p.WaitForExit();
-        if (p.ExitCode != 0) throw new InvalidOperationException($"git {string.Join(' ', args)}: {p.StandardError.ReadToEnd()}");
-    }
+    private string CreateRepository(string taskfile = Taskfile, string path = "Taskfile.yml") =>
+        E2E.CreateRepository(_repoDir, new Dictionary<string, string> { [path] = taskfile });
 
     public void Dispose()
     {
