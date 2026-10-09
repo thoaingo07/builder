@@ -70,6 +70,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ICurren
             e.Property(x => x.TaskVars).HasJsonConversion();
             e.Property(x => x.Approval).HasJsonConversion();
             e.Property(x => x.Deploy).HasJsonConversion();
+            e.Property(x => x.Registries).HasJsonConversion();
         });
 
         m.Entity<LogLine>(e => e.ToTable("log_lines"));

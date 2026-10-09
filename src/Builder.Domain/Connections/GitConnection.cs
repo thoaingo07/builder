@@ -2,9 +2,15 @@ using Builder.Domain.Organizations;
 
 namespace Builder.Domain.Connections;
 
-public enum ConnectionType { AzureDevOps, Git }
+public enum ConnectionType { AzureDevOps, Git, Azure }
 
-/// <summary>Credentials for a git host. <see cref="TokenProtected"/> holds ciphertext.</summary>
+/// <summary>Pat: a stored token. ServicePrincipal: Entra client credentials; the API mints short-lived tokens.</summary>
+public enum ConnectionAuthKind { Pat, ServicePrincipal }
+
+/// <summary>
+/// Credentials for a git host (Azure DevOps, plain git) or for Azure (container registries).
+/// <see cref="TokenProtected"/> holds ciphertext: the PAT, or the service principal's client secret.
+/// </summary>
 public sealed class GitConnection : IOrgScoped
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7();
@@ -15,6 +21,9 @@ public sealed class GitConnection : IOrgScoped
     public string Url { get; private set; } = "";
     public string? Username { get; private set; }
     public string? TokenProtected { get; private set; }
+    public ConnectionAuthKind AuthKind { get; private set; } = ConnectionAuthKind.Pat;
+    public string? TenantId { get; private set; }
+    public string? ClientId { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
     private GitConnection() { }
@@ -34,5 +43,25 @@ public sealed class GitConnection : IOrgScoped
         Url = url.Trim().TrimEnd('/');
         Username = string.IsNullOrWhiteSpace(username) ? null : username.Trim();
         if (tokenProtected is not null) TokenProtected = tokenProtected;
+    }
+
+    /// <summary>Use an Entra service principal (client credentials) instead of a PAT.</summary>
+    public void UseServicePrincipal(string tenantId, string clientId)
+    {
+        if (Type == ConnectionType.Git) throw new DomainException("Plain git connections use a token.");
+        if (!Guid.TryParse(tenantId, out _) && !tenantId.Contains('.'))
+            throw new DomainException("Tenant must be the directory (tenant) id or its domain.");
+        if (!Guid.TryParse(clientId, out _)) throw new DomainException("Client id must be the application (client) id GUID.");
+        AuthKind = ConnectionAuthKind.ServicePrincipal;
+        TenantId = tenantId.Trim();
+        ClientId = clientId.Trim();
+    }
+
+    public void UsePat()
+    {
+        if (Type == ConnectionType.Azure) throw new DomainException("Azure connections use a service principal.");
+        AuthKind = ConnectionAuthKind.Pat;
+        TenantId = null;
+        ClientId = null;
     }
 }

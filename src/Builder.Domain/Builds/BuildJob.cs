@@ -4,6 +4,9 @@ public enum JobStatus { Pending, Queued, WaitingApproval, Assigned, Running, Suc
 
 public sealed record ApprovalSpec(string Message, List<string> Approvers);
 
+/// <summary>A container registry the job logs in to (x-registries), through an Azure connection (null = the organization's only one).</summary>
+public sealed record RegistrySpec(string Registry, string? Connection);
+
 public sealed record DeploySpec(
     string Environment,
     string? Compose,
@@ -28,6 +31,10 @@ public sealed class BuildJob
     public List<string> Artifacts { get; private set; } = new();
     /// <summary>Secret names the task declared (x-secrets); values are fetched by the agent at run time.</summary>
     public List<string> Secrets { get; private set; } = new();
+    /// <summary>Registries the agent logs in to before the task runs (short-lived tokens).</summary>
+    public List<RegistrySpec> Registries { get; private set; } = new();
+    /// <summary>Hand the task a short-lived token for the Azure Artifacts feeds of the repository's Azure DevOps organization.</summary>
+    public bool AzureArtifacts { get; private set; }
     public bool HasCommands { get; private set; }
     public ApprovalSpec? Approval { get; private set; }
     public DeploySpec? Deploy { get; private set; }
@@ -49,9 +56,12 @@ public sealed class BuildJob
 
     public BuildJob(string key, string taskName, string? description, int order, IEnumerable<string> dependsOn,
         Dictionary<string, string>? taskVars, IEnumerable<string>? labels, IEnumerable<string>? artifacts,
-        bool hasCommands, ApprovalSpec? approval, DeploySpec? deploy, IEnumerable<string>? secrets = null)
+        bool hasCommands, ApprovalSpec? approval, DeploySpec? deploy, IEnumerable<string>? secrets = null,
+        IEnumerable<RegistrySpec>? registries = null, bool azureArtifacts = false)
     {
         Secrets = secrets?.ToList() ?? new();
+        Registries = registries?.ToList() ?? new();
+        AzureArtifacts = azureArtifacts;
         Key = key;
         TaskName = taskName;
         Description = description;

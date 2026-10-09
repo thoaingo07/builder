@@ -81,6 +81,35 @@ secrets over its authenticated connection; the API only answers the agent the jo
 runs, and only with the declared names. The daemon passes them to go-task as variables (`NAME=value` arguments)
 and environment variables, and masks the values (≥ 4 characters) in every log line it ships.
 
+## What daemons keep (nothing)
+
+- **Credentials are fetched, not shipped**: the job message carries no credentials. When a job starts the daemon
+  asks the API for that job's credentials and secrets (only the assigned agent, only while the job runs).
+- **Short-lived where possible**: connections can use an **Entra service principal** instead of a PAT. The API
+  then mints per-job tokens: Azure DevOps (git fetch, Azure Artifacts) ~1 h; ACR ~3 h (`x-registries`, via the
+  `/oauth2/exchange` of the registry). PAT connections hand out the PAT for that job.
+- **Memory and the job sandbox only**: credentials live in the daemon's memory and the job's environment; git
+  auth uses `GIT_CONFIG_*` environment variables, secrets are environment variables, nothing is on a command line.
+  Each job has its own `HOME`, `DOCKER_CONFIG`, `AZURE_CONFIG_DIR`, `TMPDIR`…, deleted when the job ends, so
+  `docker login`, `dotnet nuget add source`, `az login` leave nothing behind. Leftovers from a crash are swept on
+  start.
+- **No source left**: the checkout is deleted when the build finishes (`Agent:KeepWorkspaces=true` to keep).
+  Package caches (NuGet/npm) stay shared: packages, not credentials.
+
+```yaml
+publish:
+  x-azure-artifacts: true                 # $VSS_NUGET_ACCESSTOKEN / $AZURE_DEVOPS_TOKEN for Azure Artifacts feeds
+  x-registries: [shop.azurecr.io]         # docker login done for you (short-lived ACR token)
+  cmds:
+    - dotnet restore                      # private feed via the Azure Artifacts credential provider
+    - docker build -t shop.azurecr.io/web:{{.BUILDER_BUILD_NUMBER}} .
+    - docker push shop.azurecr.io/web:{{.BUILDER_BUILD_NUMBER}}
+```
+
+Requirements: the service principal is a user of the Azure DevOps organization (for git / Artifacts) and has
+`AcrPush` on the registry. NuGet restores need the Azure Artifacts Credential Provider on the daemon
+(`NUGET_PLUGIN_PATHS`), or use `$AZURE_DEVOPS_TOKEN` with `dotnet nuget add source` inside the job.
+
 ## Pipelines are Taskfiles
 
 Pipelines are plain [go-task](https://taskfile.dev) `Taskfile.yml` files kept in

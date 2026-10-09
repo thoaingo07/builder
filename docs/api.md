@@ -38,10 +38,13 @@ type MeDto = { user: UserDto; orgs: OrgDto[] }
 type OrgCreatedDto = { org: OrgDto; agentToken: string }      // token shown once
 type MemberDto = { userId; userName; displayName; email: string|null; role: OrgRole; canSignInWithGoogle: boolean; joinedAt }
 
-type ConnectionType = 'AzureDevOps'|'Git'
-type ConnectionDto = { id; name; type: ConnectionType; url; username: string|null; hasToken: boolean }
+type ConnectionType = 'AzureDevOps'|'Git'|'Azure'          // Azure = ARM / container registries (service principal)
+type ConnectionAuthKind = 'Pat'|'ServicePrincipal'
+type ConnectionDto = { id; name; type: ConnectionType; url; username: string|null; hasToken: boolean
+  authKind: ConnectionAuthKind; tenantId: string|null; clientId: string|null }
 // AzureDevOps: url = https://dev.azure.com/<org> (normalized server-side), token = PAT (Code: Read, or Read & write to save Taskfiles)
-type ConnectionInput = { name; type; url; username?; token?: string|null }   // token write-only; omit to keep
+type ConnectionInput = { name; type; url; username?; token?: string|null; authKind?; tenantId?; clientId? }
+// token = PAT, or the client secret for ServicePrincipal; write-only, omit to keep
 type ConnectionTestDto = { ok: boolean; message: string }
 type RemoteRepositoryDto = { project: string; name: string; url: string; defaultBranch: string|null }
 

@@ -38,6 +38,9 @@ public static class DependencyInjection
         services.AddSingleton<IBuildLock, BuildLock>();
         services.AddSingleton<ISchedulerSignal, SchedulerSignal>();
         services.AddHttpClient<IAzureDevOpsClient, AzureDevOpsClient>(c => c.Timeout = TimeSpan.FromSeconds(30));
+        services.Configure<AzureOptions>(config.GetSection("Azure"));
+        services.AddHttpClient<IEntraTokens, EntraTokens>(c => c.Timeout = TimeSpan.FromSeconds(30));
+        services.AddHttpClient<IAcrTokens, AcrTokens>(c => c.Timeout = TimeSpan.FromSeconds(30));
         return services;
     }
 }

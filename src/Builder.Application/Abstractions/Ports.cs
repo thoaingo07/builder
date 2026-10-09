@@ -72,7 +72,9 @@ public sealed record PlannedJob(
     bool HasCommands,
     ApprovalSpec? Approval,
     DeploySpec? Deploy,
-    IReadOnlyList<string> Secrets);
+    IReadOnlyList<string> Secrets,
+    IReadOnlyList<RegistrySpec> Registries,
+    bool AzureArtifacts);
 
 public sealed record TaskfilePlan(string EntryTask, IReadOnlyList<PlannedJob> Jobs);
 
@@ -188,4 +190,23 @@ public sealed class CurrentOrg : ICurrentOrg
         Role = role;
         UserId = userId;
     }
+}
+
+public sealed record AccessToken(string Token, DateTimeOffset ExpiresOn);
+
+/// <summary>Entra ID client-credentials tokens (cached until shortly before they expire).</summary>
+public interface IEntraTokens
+{
+    public const string AzureDevOpsScope = "499b84ac-1321-427f-aa17-267ca6975798/.default";
+    public const string ArmScope = "https://management.azure.com/.default";
+
+    Task<AccessToken> GetAsync(string tenantId, string clientId, string clientSecret, string scope, CancellationToken ct);
+}
+
+/// <summary>Azure Container Registry: exchanges an Entra (ARM) token for a registry refresh token (~3 h) usable with docker login.</summary>
+public interface IAcrTokens
+{
+    public const string DockerUser = "00000000-0000-0000-0000-000000000000";
+
+    Task<AccessToken> ExchangeAsync(string registry, string tenantId, string armToken, CancellationToken ct);
 }

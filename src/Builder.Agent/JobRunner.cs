@@ -12,7 +12,7 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
         using var sandbox = JobSandbox.Create(workspace, job.JobId, options.WorkRoot, options.SharedPackageCaches);
         var deployer = job.Deploy is { } target ? new Deployer(target, Path.Combine(sandbox.Root, "deploy"), options.WorkRoot) : null;
         await using var log = new JobLog(lines => server.SendLogAsync(job.JobId, lines),
-            [job.Source.AuthorizationHeader, job.Deploy?.PrivateKey, job.Deploy?.AksClientSecret, job.Deploy?.Kubeconfig]);
+            [job.Deploy?.PrivateKey, job.Deploy?.AksClientSecret, job.Deploy?.Kubeconfig]);
         var secrets = new Dictionary<string, string>();
         string? derivedTaskfile = null;
         try
@@ -27,7 +27,14 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
                 log.System($"Secrets: {string.Join(", ", secrets.Keys.Order())}");
             }
 
-            await workspace.CheckoutAsync(job.Source, log, ct);
+            // short-lived credentials for this job only: git, registries, Azure DevOps (kept in memory, masked)
+            var credentials = await server.GetJobCredentialsAsync(job.JobId);
+            log.AddSecrets([credentials.GitAuthorization ?? "", credentials.AzureDevOpsToken ?? "",
+                .. credentials.Registries.Select(r => r.Password)]);
+            if (credentials.ExpiresAt is { } expires)
+                log.System($"Credentials valid until {expires:u}");
+
+            await workspace.CheckoutAsync(job.Source, credentials.GitAuthorization, log, ct);
             // runners run from the repository root (go-task --dir), so artifact globs are repository-relative too
             var taskDir = workspace.Source;
 
@@ -44,6 +51,21 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
             {
                 await deployer.PrepareAsync(log, ct);
                 foreach (var (k, v) in deployer.Environment) env[k] = v;
+            }
+
+            foreach (var registry in credentials.Registries)
+            {
+                // into the job sandbox's DOCKER_CONFIG, password on stdin: gone when the job ends
+                log.System($"docker login {registry.Server}");
+                var login = await ProcessRunner.RunAsync("docker", ["login", registry.Server, "--username", registry.Username, "--password-stdin"],
+                    workspace.Source, env, log.Write, ct, stdin: registry.Password);
+                if (login != 0) return Fail(log, job, login, $"docker login {registry.Server} failed");
+            }
+            if (credentials.AzureDevOpsToken is { } adoToken)
+            {
+                env["AZURE_DEVOPS_TOKEN"] = adoToken;      // for npm/pip/your own scripts
+                env["VSS_NUGET_ACCESSTOKEN"] = adoToken;   // Azure Artifacts Credential Provider (NuGet restore)
+                env["SYSTEM_ACCESSTOKEN"] = adoToken;      // same name Azure Pipelines uses
             }
 
             derivedTaskfile = workspace.PrepareTaskfile(job.TaskfilePath, job.TaskName, job.JobId);
@@ -115,4 +137,5 @@ public interface IServerChannel
     Task JobStartedAsync(Guid jobId);
     Task SendLogAsync(Guid jobId, List<LogChunk> lines);
     Task<Dictionary<string, string>> GetJobSecretsAsync(Guid jobId);
+    Task<JobCredentials> GetJobCredentialsAsync(Guid jobId);
 }

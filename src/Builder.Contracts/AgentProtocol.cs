@@ -14,6 +14,7 @@ public static class AgentHubNames
     public const string JobCompleted = nameof(JobCompleted);
     public const string CleanupCompleted = nameof(CleanupCompleted);
     public const string GetJobSecrets = nameof(GetJobSecrets);
+    public const string GetJobCredentials = nameof(GetJobCredentials);
     public const string TeardownCompleted = nameof(TeardownCompleted);
 
     // server → agent
@@ -56,7 +57,20 @@ public enum LogStream { Out, Err, System }
 
 public sealed record LogChunk(DateTimeOffset Timestamp, LogStream Stream, string Text);
 
-public sealed record GitSource(string Url, string Branch, string Commit, string? AuthorizationHeader);
+/// <summary>What to fetch. Credentials are not part of the assignment: the agent asks for them when the job starts.</summary>
+public sealed record GitSource(string Url, string Branch, string Commit);
+
+public sealed record RegistryLogin(string Server, string Username, string Password);
+
+/// <summary>
+/// Short-lived credentials for one job, fetched by the agent running it (GetJobCredentials). Entra tokens last
+/// about an hour, ACR tokens about three; PAT-based connections hand out the PAT.
+/// </summary>
+public sealed record JobCredentials(
+    string? GitAuthorization,
+    RegistryLogin[] Registries,
+    string? AzureDevOpsToken,
+    DateTimeOffset? ExpiresAt);
 
 public sealed record ArtifactRef(Guid ArtifactId, string Name, string DownloadPath);
 

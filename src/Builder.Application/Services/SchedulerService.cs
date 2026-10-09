@@ -14,7 +14,6 @@ public sealed class SchedulerService(
     IClock clock,
     IAgentGateway gateway,
     IBuildLock buildLock,
-    GitRemotes remotes,
     ISecretProtector secrets,
     BuildEvents events,
     ILogger<SchedulerService> log)
@@ -93,7 +92,7 @@ public sealed class SchedulerService(
     private async Task<JobAssignment> BuildAssignmentAsync(Build build, BuildJob job, CancellationToken ct)
     {
         var pipeline = await db.Pipelines.AsNoTracking().IgnoreQueryFilters().FirstAsync(p => p.Id == build.PipelineId, ct);
-        var (remote, _) = await remotes.ForPipelineAsync(pipeline, ct);
+        var repository = await db.Repositories.AsNoTracking().IgnoreQueryFilters().FirstAsync(r => r.Id == pipeline.RepositoryId, ct);
 
         // artifacts produced by any upstream job
         var upstream = Upstream(build, job);
@@ -124,7 +123,7 @@ public sealed class SchedulerService(
         }
 
         return new JobAssignment(job.Id, build.Id, build.Number, pipeline.Name, job.TaskName, taskVars,
-            new GitSource(remote.Url, build.Branch, build.Commit!, remote.AuthorizationHeader),
+            new GitSource(repository.Url, build.Branch, build.Commit!),
             pipeline.TaskfilePath, env, job.Artifacts.ToArray(),
             artifacts.Select(a => new ArtifactRef(a.Id, a.Name, $"/api/agent/artifacts/{a.Id}")).ToArray(),
             deploy, job.Secrets.ToArray());

@@ -28,8 +28,11 @@ public sealed class ConnectionService(
         current.RequireRole(OrgRole.Admin);
         var c = new GitConnection(current.RequireOrgId(), input.Name, input.Type, Normalize(input.Type, input.Url), clock.UtcNow);
         c.Update(input.Name, input.Type, Normalize(input.Type, input.Url), input.Username, Protect(input.Token));
-        if (c.Type == ConnectionType.AzureDevOps && c.TokenProtected is null)
-            throw new DomainException("An Azure DevOps connection needs a personal access token (scope: Code → Read; Read & write to commit Taskfile edits).");
+        ApplyAuth(c, input);
+        if (c.Type != ConnectionType.Git && c.TokenProtected is null)
+            throw new DomainException(c.AuthKind == ConnectionAuthKind.ServicePrincipal
+                ? "A service principal connection needs its client secret."
+                : "An Azure DevOps connection needs a personal access token (scope: Code → Read; Read & write to commit Taskfile edits).");
         db.Connections.Add(c);
         await db.SaveChangesAsync(ct);
         return c.ToDto();
@@ -38,8 +41,9 @@ public sealed class ConnectionService(
     public async Task<ConnectionDto> UpdateAsync(Guid id, ConnectionInput input, CancellationToken ct)
     {
         current.RequireRole(OrgRole.Admin);
-        var c = await FindAsync(id, ct);
+        var c = await db.Connections.FirstOrDefaultAsync(x => x.Id == id, ct) ?? throw new NotFoundException("Connection");
         c.Update(input.Name, input.Type, Normalize(input.Type, input.Url), input.Username, Protect(input.Token));
+        ApplyAuth(c, input);
         await db.SaveChangesAsync(ct);
         return c.ToDto();
     }
@@ -58,29 +62,34 @@ public sealed class ConnectionService(
     public async Task<ConnectionTestDto> TestAsync(Guid id, CancellationToken ct)
     {
         var c = await FindAsync(id, ct);
+        if (c.Type == ConnectionType.Azure)
+        {
+            var arm = await remotes.ArmTokenAsync(c, ct);
+            return new ConnectionTestDto(true, $"Service principal accepted by Entra ID (token valid until {arm.ExpiresOn:HH:mm} UTC).");
+        }
         if (c.Type != ConnectionType.AzureDevOps)
             return new ConnectionTestDto(true, "Saved. Plain git credentials are checked when a repository is added.");
-        var projects = await azureDevOps.TestAsync(c.Url, Authorization(c), ct);
+        var projects = await azureDevOps.TestAsync(c.Url, await AuthorizationAsync(c, ct), ct);
         return new ConnectionTestDto(true, $"Connected to {c.Url}: {projects} project(s) visible.");
     }
 
     public async Task<IReadOnlyList<string>> ProjectsAsync(Guid id, CancellationToken ct)
     {
         var c = await AzureDevOpsAsync(id, ct);
-        return await azureDevOps.ListProjectsAsync(c.Url, Authorization(c), ct);
+        return await azureDevOps.ListProjectsAsync(c.Url, await AuthorizationAsync(c, ct), ct);
     }
 
     public async Task<IReadOnlyList<RemoteRepositoryDto>> RepositoriesAsync(Guid id, string? project, CancellationToken ct)
     {
         var c = await AzureDevOpsAsync(id, ct);
-        return await azureDevOps.ListRepositoriesAsync(c.Url, project, Authorization(c), ct);
+        return await azureDevOps.ListRepositoriesAsync(c.Url, project, await AuthorizationAsync(c, ct), ct);
     }
 
     /// <summary>Branches of a repository URL through this connection (before the repository is added).</summary>
     public async Task<IReadOnlyList<string>> BranchesAsync(Guid id, string url, CancellationToken ct)
     {
         var c = await FindAsync(id, ct);
-        return await git.ListBranchesAsync(new GitRemote(url, remotes.AuthorizationHeader(c)), ct);
+        return await git.ListBranchesAsync(new GitRemote(url, await remotes.AuthorizationAsync(c, ct)), ct);
     }
 
     private async Task<GitConnection> FindAsync(Guid id, CancellationToken ct) =>
@@ -90,11 +99,21 @@ public sealed class ConnectionService(
     {
         var c = await FindAsync(id, ct);
         if (c.Type != ConnectionType.AzureDevOps) throw new DomainException("This is only available for Azure DevOps connections.");
-        if (c.TokenProtected is null) throw new DomainException("The connection has no personal access token.");
+        if (c.TokenProtected is null) throw new DomainException("The connection has no credentials.");
         return c;
     }
 
-    private string Authorization(GitConnection c) => remotes.AuthorizationHeader(c) ?? throw new DomainException("The connection has no token.");
+    private async Task<string> AuthorizationAsync(GitConnection c, CancellationToken ct) =>
+        await remotes.AuthorizationAsync(c, ct) ?? throw new DomainException("The connection has no credentials.");
+
+    private static void ApplyAuth(GitConnection c, ConnectionInput input)
+    {
+        var kind = c.Type == ConnectionType.Azure ? ConnectionAuthKind.ServicePrincipal : input.AuthKind ?? ConnectionAuthKind.Pat;
+        if (kind == ConnectionAuthKind.ServicePrincipal)
+            c.UseServicePrincipal(input.TenantId ?? c.TenantId ?? "", input.ClientId ?? c.ClientId ?? "");
+        else
+            c.UsePat();
+    }
 
     private string? Protect(string? token) => string.IsNullOrWhiteSpace(token) ? null : secrets.Protect(token.Trim());
 

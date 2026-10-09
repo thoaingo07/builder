@@ -79,8 +79,11 @@ public sealed record DeploymentDto(
     int BuildNumber, Guid JobId, string Name, string? Url, DeploymentStatus Status, string? Output,
     DateTimeOffset CreatedAt, DateTimeOffset? UpdatedAt);
 
-public sealed record ConnectionDto(Guid Id, string Name, ConnectionType Type, string Url, string? Username, bool HasToken);
-public sealed record ConnectionInput(string Name, ConnectionType Type, string Url, string? Username, string? Token);
+public sealed record ConnectionDto(Guid Id, string Name, ConnectionType Type, string Url, string? Username, bool HasToken,
+    ConnectionAuthKind AuthKind, string? TenantId, string? ClientId);
+/// <summary>Token = the PAT, or the client secret when AuthKind is ServicePrincipal (write-only either way).</summary>
+public sealed record ConnectionInput(string Name, ConnectionType Type, string Url, string? Username, string? Token,
+    ConnectionAuthKind? AuthKind = null, string? TenantId = null, string? ClientId = null);
 public sealed record ConnectionTestDto(bool Ok, string Message);
 /// <summary>A repository as the git host lists it (Azure DevOps picker).</summary>
 public sealed record RemoteRepositoryDto(string Project, string Name, string Url, string? DefaultBranch);

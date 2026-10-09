@@ -50,5 +50,5 @@ public static class Mapping
         d.Name, d.Url, d.Status, d.Output, d.CreatedAt, d.UpdatedAt);
 
     public static ConnectionDto ToDto(this GitConnection c) =>
-        new(c.Id, c.Name, c.Type, c.Url, c.Username, c.TokenProtected is not null);
+        new(c.Id, c.Name, c.Type, c.Url, c.Username, c.TokenProtected is not null, c.AuthKind, c.TenantId, c.ClientId);
 }

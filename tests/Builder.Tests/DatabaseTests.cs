@@ -158,6 +158,72 @@ public sealed class DatabaseTests(AspireFixture aspire) : IAsyncLifetime
         await Assert.ThrowsAsync<Builder.Application.ForbiddenException>(() => secrets.ForJobAsync(agentA, job.Id, default)); // job finished
     }
 
+    private sealed class FakeEntra : Builder.Application.Abstractions.IEntraTokens
+    {
+        public List<string> Scopes { get; } = new();
+        public Task<Builder.Application.Abstractions.AccessToken> GetAsync(string tenantId, string clientId, string clientSecret, string scope, CancellationToken ct)
+        {
+            Scopes.Add(scope);
+            return Task.FromResult(new Builder.Application.Abstractions.AccessToken($"entra:{clientId}:{clientSecret}:{scope}", Now.AddHours(1)));
+        }
+    }
+
+    private sealed class FakeAcr : Builder.Application.Abstractions.IAcrTokens
+    {
+        public Task<Builder.Application.Abstractions.AccessToken> ExchangeAsync(string registry, string tenantId, string armToken, CancellationToken ct) =>
+            Task.FromResult(new Builder.Application.Abstractions.AccessToken($"acr:{registry}:{armToken}", Now.AddHours(3)));
+    }
+
+    [Fact]
+    public async Task Job_credentials_are_minted_for_the_running_agent_only()
+    {
+        using (var migrator = new DatabaseMigrator(_connectionString)) migrator.Up();
+        await using var db = Db();
+        var protector = new Builder.Infrastructure.Services.DataProtectionSecretProtector(
+            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create("tests"));
+        var org = new Builder.Domain.Organizations.Organization("Acme", "admin", Now);
+        var ado = new GitConnection(org.Id, "ado", ConnectionType.AzureDevOps, "https://dev.azure.com/acme", Now);
+        ado.Update("ado", ConnectionType.AzureDevOps, "https://dev.azure.com/acme", null, protector.Protect("ado-secret"));
+        ado.UseServicePrincipal("11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222");
+        var azure = new GitConnection(org.Id, "azure-prod", ConnectionType.Azure, "https://management.azure.com", Now);
+        azure.Update("azure-prod", ConnectionType.Azure, "https://management.azure.com", null, protector.Protect("arm-secret"));
+        azure.UseServicePrincipal("11111111-1111-1111-1111-111111111111", "33333333-3333-3333-3333-333333333333");
+        var repo = new Builder.Domain.Repositories.Repository(org.Id, ado.Id, null, "https://dev.azure.com/acme/Shop/_git/web", "main", Now);
+        var runner = new Pipeline(repo, "ci", ".builder/runners/ci.yml", null, Now);
+        var build = Build.Queue(org.Id, runner.Id, 1, "main", null, null, "admin", Now);
+        db.AddRange(org, ado, azure, repo, runner, build);
+        await db.SaveChangesAsync();
+        build.Planned("abc", "ci", [new BuildJob("push", "push", null, 0, [], null, null, null, true, null, null, null,
+            [new RegistrySpec("shop.azurecr.io", null)], azureArtifacts: true)], Now);
+        await db.SaveChangesAsync();
+
+        var entra = new FakeEntra();
+        var remotes = new Builder.Application.Services.GitRemotes(db, protector, entra);
+        var credentials = new Builder.Application.Services.CredentialService(db, remotes, new FakeAcr());
+        var job = build.Jobs.Single();
+        var agent = Guid.NewGuid();
+        await Assert.ThrowsAsync<Builder.Application.ForbiddenException>(() => credentials.ForJobAsync(agent, job.Id, default));
+
+        job.AssignTo(agent, "agent-1");
+        await db.SaveChangesAsync();
+        var c = await credentials.ForJobAsync(agent, job.Id, default);
+
+        Assert.Equal("Bearer entra:22222222-2222-2222-2222-222222222222:ado-secret:" + Builder.Application.Abstractions.IEntraTokens.AzureDevOpsScope, c.GitAuthorization);
+        Assert.Equal("entra:22222222-2222-2222-2222-222222222222:ado-secret:" + Builder.Application.Abstractions.IEntraTokens.AzureDevOpsScope, c.AzureDevOpsToken);
+        var login = Assert.Single(c.Registries);
+        Assert.Equal(("shop.azurecr.io", "00000000-0000-0000-0000-000000000000"), (login.Server, login.Username));
+        Assert.Equal("acr:shop.azurecr.io:entra:33333333-3333-3333-3333-333333333333:arm-secret:" + Builder.Application.Abstractions.IEntraTokens.ArmScope, login.Password);
+        Assert.Equal(Now.AddHours(1), c.ExpiresAt);   // the soonest expiry
+        await Assert.ThrowsAsync<Builder.Application.ForbiddenException>(() => credentials.ForJobAsync(Guid.NewGuid(), job.Id, default));
+
+        // a PAT connection hands out Basic auth with the PAT
+        ado.UsePat();
+        await db.SaveChangesAsync();
+        var pat = await credentials.ForJobAsync(agent, job.Id, default);
+        Assert.StartsWith("Basic ", pat.GitAuthorization);
+        Assert.Equal("ado-secret", pat.AzureDevOpsToken);
+    }
+
     private async Task<List<string>> TablesAsync()
     {
         await using var c = new NpgsqlConnection(_connectionString);

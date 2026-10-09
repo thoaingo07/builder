@@ -16,6 +16,7 @@ public sealed class BuildPlanningService(
     ITaskfilePlanner planner,
     GitRemotes remotes,
     IBuildLock buildLock,
+    CredentialService credentials,
     BuildEvents events,
     ILogger<BuildPlanningService> log)
 {
@@ -39,7 +40,7 @@ public sealed class BuildPlanningService(
                 ?? throw new TaskfileException($"'{pipeline.TaskfilePath}' was not found at {commit[..Math.Min(8, commit.Length)]}.");
             var plan = planner.Plan(yaml, string.IsNullOrEmpty(build.EntryTask) ? pipeline.EntryTask : build.EntryTask);
             entry = plan.EntryTask;
-            jobs = await ToJobsAsync(plan, build.OrgId, ct);
+            jobs = await ToJobsAsync(plan, build.OrgId, pipeline.RepositoryId, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -65,7 +66,12 @@ public sealed class BuildPlanningService(
         return true;
     }
 
-    private async Task<List<BuildJob>> ToJobsAsync(TaskfilePlan plan, Guid orgId, CancellationToken ct)
+    private async Task<bool> RepositoryUsesAzureDevOpsAsync(Guid orgId, Guid repositoryId, CancellationToken ct) =>
+        await db.Repositories.AsNoTracking().IgnoreQueryFilters().Where(r => r.Id == repositoryId && r.OrgId == orgId)
+            .Join(db.Connections.IgnoreQueryFilters(), r => r.ConnectionId, c => c.Id, (r, c) => c.Type)
+            .AnyAsync(t => t == Domain.Connections.ConnectionType.AzureDevOps, ct);
+
+    private async Task<List<BuildJob>> ToJobsAsync(TaskfilePlan plan, Guid orgId, Guid repositoryId, CancellationToken ct)
     {
         var envNames = plan.Jobs.Where(j => j.Deploy is not null).Select(j => j.Deploy!.Environment).Distinct().ToList();
         var envs = await db.Environments.AsNoTracking().IgnoreQueryFilters().Where(e => e.OrgId == orgId && envNames.Contains(e.Name)).ToListAsync(ct);
@@ -79,6 +85,16 @@ public sealed class BuildPlanningService(
         var unknown = wanted.Except(known).ToList();
         if (unknown.Count > 0)
             throw new TaskfileException($"Unknown secret(s): {string.Join(", ", unknown)}. Add them under Secrets.");
+
+        // registries need an Azure container registry and a resolvable Azure connection; Azure Artifacts an Azure DevOps repo
+        foreach (var spec in plan.Jobs.SelectMany(j => j.Registries).DistinctBy(r => (r.Registry, r.Connection)))
+        {
+            if (!CredentialService.IsAzureContainerRegistry(spec.Registry))
+                throw new TaskfileException($"x-registries: {spec.Registry} is not an Azure Container Registry (*.azurecr.io); use x-secrets + docker login for other registries.");
+            await credentials.AzureConnectionAsync(orgId, spec, ct);
+        }
+        if (plan.Jobs.Any(j => j.AzureArtifacts) && !await RepositoryUsesAzureDevOpsAsync(orgId, repositoryId, ct))
+            throw new TaskfileException("x-azure-artifacts needs the repository to be added with an Azure DevOps connection.");
 
         return plan.Jobs.Select(p =>
         {
@@ -96,7 +112,7 @@ public sealed class BuildPlanningService(
             }
             if (p.HasCommands) labels.Add("task");
             return new BuildJob(p.Key, p.TaskName, p.Description, p.Order, p.DependsOn, p.TaskVars,
-                labels.Distinct().ToList(), p.Artifacts, p.HasCommands, approval, p.Deploy, p.Secrets);
+                labels.Distinct().ToList(), p.Artifacts, p.HasCommands, approval, p.Deploy, p.Secrets, p.Registries, p.AzureArtifacts);
         }).ToList();
     }
 }

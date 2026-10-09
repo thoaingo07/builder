@@ -111,7 +111,25 @@ public sealed class TaskfilePlanner : ITaskfilePlanner
         }
 
         var desc = m is null ? null : Scalar(Get(m, "desc")) ?? Scalar(Get(m, "summary"));
-        return new PlannedJob(key, name, desc, order, deps, vars, labels, artifacts, hasCommands, approval, deploy, secrets);
+        var registries = new List<RegistrySpec>();
+        if (m is not null && Get(m, "x-registries") is YamlSequenceNode regs)
+            foreach (var r in regs.Children)
+            {
+                var spec = r switch
+                {
+                    YamlScalarNode s when !string.IsNullOrWhiteSpace(s.Value) => new RegistrySpec(s.Value!.Trim().ToLowerInvariant(), null),
+                    YamlMappingNode rm when Scalar(Get(rm, "registry")) is { } host => new RegistrySpec(host.Trim().ToLowerInvariant(), Scalar(Get(rm, "connection"))),
+                    _ => throw new TaskfileException($"Task '{name}': each x-registries entry is a registry host or {{ registry, connection }}."),
+                };
+                if (spec.Registry.Contains('/') || spec.Registry.Contains(':'))
+                    throw new TaskfileException($"Task '{name}': '{spec.Registry}' should be a registry host such as myregistry.azurecr.io.");
+                registries.Add(spec);
+            }
+        else if (m is not null && Get(m, "x-registries") is not null)
+            throw new TaskfileException($"Task '{name}': x-registries must be a list.");
+        var azureArtifacts = m is not null && Get(m, "x-azure-artifacts") is { } aa && IsTrue(aa);
+
+        return new PlannedJob(key, name, desc, order, deps, vars, labels, artifacts, hasCommands, approval, deploy, secrets, registries, azureArtifacts);
     }
 
     private static IEnumerable<(string Name, Dictionary<string, string> Vars)> DepsOf(YamlNode node)

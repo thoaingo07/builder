@@ -25,7 +25,7 @@ public sealed class Workspace
     public string Source { get; }
     public string Temp { get; }
 
-    public async Task CheckoutAsync(GitSource source, JobLog log, CancellationToken ct)
+    public async Task CheckoutAsync(GitSource source, string? authorization, JobLog log, CancellationToken ct)
     {
         var gate = Locks.GetOrAdd(BuildId, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(ct);
@@ -44,7 +44,7 @@ public sealed class Workspace
             }
             log.System($"Checking out {source.Url} @ {source.Branch} ({Short(source.Commit)})");
             await Git(log, ct, null, "init", "--quiet");
-            var auth = GitAuthEnvironment(source.AuthorizationHeader);
+            var auth = GitAuthEnvironment(authorization);
             var fetched = await Git(log, ct, auth, "fetch", "--quiet", "--depth", "1", source.Url, source.Commit) == 0;
             if (!fetched)
             {

@@ -169,6 +169,9 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
 
     public Task JobStartedAsync(Guid jobId) => _hub.InvokeAsync(AgentHubNames.JobStarted, jobId);
 
+    public Task<JobCredentials> GetJobCredentialsAsync(Guid jobId) =>
+        _hub.InvokeAsync<JobCredentials>(AgentHubNames.GetJobCredentials, jobId);
+
     public Task<Dictionary<string, string>> GetJobSecretsAsync(Guid jobId) =>
         _hub.InvokeAsync<Dictionary<string, string>>(AgentHubNames.GetJobSecrets, jobId);
 
