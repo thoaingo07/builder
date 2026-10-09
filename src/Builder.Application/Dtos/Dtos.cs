@@ -1,0 +1,92 @@
+using Builder.Domain.Builds;
+using Builder.Domain.Connections;
+using Builder.Domain.Deployments;
+
+namespace Builder.Application.Dtos;
+
+public sealed record UserDto(string UserName, string DisplayName, bool IsAdmin);
+
+public sealed record JobCounts(int Total, int Pending, int Running, int WaitingApproval, int Succeeded, int Failed, int Skipped, int Canceled);
+
+public sealed record BuildSummaryDto(
+    Guid Id, Guid PipelineId, string PipelineName, int Number, string Branch, string? Commit, string EntryTask,
+    BuildStatus Status, string RequestedBy, string? Error,
+    DateTimeOffset QueuedAt, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, JobCounts JobCounts);
+
+public sealed record ApprovalDto(string Message, List<string> Approvers, string? DecidedBy, DateTimeOffset? DecidedAt, string? Comment);
+
+public sealed record JobDto(
+    Guid Id, Guid BuildId, string Key, string TaskName, string? Description, int Order, List<string> DependsOn,
+    List<string> Labels, List<string> Artifacts, JobStatus Status, Guid? AgentId, string? AgentName,
+    int? ExitCode, string? Error, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt,
+    ApprovalDto? Approval, DeploySpec? Deploy);
+
+public sealed record ArtifactDto(Guid Id, Guid JobId, string Name, long SizeBytes, DateTimeOffset CreatedAt);
+
+public sealed record BuildDetailDto(
+    Guid Id, Guid PipelineId, string PipelineName, int Number, string Branch, string? Commit, string EntryTask,
+    BuildStatus Status, string RequestedBy, string? Error,
+    DateTimeOffset QueuedAt, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, JobCounts JobCounts,
+    Dictionary<string, string> Variables, List<JobDto> Jobs, List<ArtifactDto> Artifacts, List<DeploymentDto> Deployments);
+
+public sealed record LogLineDto(long Id, Guid JobId, DateTimeOffset Timestamp, LogStreamKind Stream, string Text);
+
+public sealed record PipelineDto(
+    Guid Id, string Name, Guid? ConnectionId, string? ConnectionName, string RepositoryUrl, string DefaultBranch,
+    string TaskfilePath, string? EntryTask, BuildSummaryDto? LastBuild);
+
+public sealed record PipelineInput(string Name, Guid? ConnectionId, string RepositoryUrl, string? DefaultBranch,
+    string? TaskfilePath, string? EntryTask);
+
+public sealed record TaskfileDto(string Path, string Branch, string Commit, string Content);
+public sealed record SaveTaskfileInput(string? Branch, string Content, string? Message);
+public sealed record PlanRequest(string Content, string? EntryTask);
+public sealed record PlanJobDto(string Key, string TaskName, List<string> DependsOn, bool Approval, string? Deploy);
+public sealed record PlanPreviewDto(string EntryTask, List<PlanJobDto> Jobs, string? Error);
+
+public sealed record QueueBuildInput(string? Branch, string? EntryTask, Dictionary<string, string>? Variables);
+public sealed record ApprovalInput(bool Approved, string? Comment);
+
+public sealed record AgentMetricsDto(
+    DateTimeOffset At, double CpuPercent, int CpuCount, long MemoryTotalBytes, long MemoryUsedBytes,
+    long DiskTotalBytes, long DiskUsedBytes, double LoadAverage1, int RunningJobs);
+
+public sealed record AgentRunningJobDto(Guid BuildId, int BuildNumber, string PipelineName, Guid JobId, string TaskName);
+
+public sealed record AgentDto(
+    Guid Id, string Name, string HostName, string Os, string Version, int Capacity, List<string> Labels,
+    bool Enabled, bool Online, DateTimeOffset? LastSeenAt, AgentMetricsDto? Metrics, List<AgentRunningJobDto> RunningJobs);
+
+public sealed record AgentUpdateInput(bool Enabled);
+public sealed record AgentCleanupInput(bool RemoveWorkspaces, bool DockerPrune);
+
+public sealed record EnvironmentDto(
+    Guid Id, string Name, EnvironmentType Type, bool RequiresApproval, List<string> Approvers, List<string> AgentLabels,
+    string? Host, int Port, string? Username, bool HasPrivateKey,
+    bool HasKubeconfig, string? AksTenantId, string? AksClientId, bool HasAksClientSecret,
+    string? AksSubscriptionId, string? AksResourceGroup, string? AksClusterName, bool AksAdmin);
+
+public sealed record EnvironmentInput(
+    string Name, EnvironmentType Type, bool RequiresApproval, List<string>? Approvers, List<string>? AgentLabels,
+    string? Host, int? Port, string? Username, string? PrivateKey,
+    string? Kubeconfig, string? AksTenantId, string? AksClientId, string? AksClientSecret,
+    string? AksSubscriptionId, string? AksResourceGroup, string? AksClusterName, bool AksAdmin);
+
+public sealed record DeploymentDto(
+    Guid Id, Guid EnvironmentId, string EnvironmentName, Guid PipelineId, string PipelineName, Guid BuildId,
+    int BuildNumber, Guid JobId, string Name, string? Url, DeploymentStatus Status, string? Output,
+    DateTimeOffset CreatedAt, DateTimeOffset? UpdatedAt);
+
+public sealed record ConnectionDto(Guid Id, string Name, ConnectionType Type, string Url, string? Username, bool HasToken);
+public sealed record ConnectionInput(string Name, ConnectionType Type, string Url, string? Username, string? Token);
+public sealed record RepositoryDto(string Project, string Name, string Url, string? DefaultBranch);
+
+public sealed record CleanupInput(int OlderThanDays, int KeepLastPerPipeline, bool RemoveWorkspaces, bool DockerPrune);
+public sealed record CleanupResultDto(int BuildsDeleted, int ArtifactsDeleted, long BytesFreed, int AgentsNotified);
+
+public sealed record Last24hDto(int Succeeded, int Failed, int Canceled, int Running);
+public sealed record DashboardDto(
+    List<AgentDto> Agents, List<BuildSummaryDto> ActiveBuilds, List<BuildSummaryDto> RecentBuilds,
+    List<DeploymentDto> ActiveDeployments, Last24hDto Last24h);
+
+public sealed record LoginInput(string UserName, string Password);

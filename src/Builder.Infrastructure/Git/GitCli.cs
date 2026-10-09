@@ -1,0 +1,140 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
+using Builder.Application.Abstractions;
+using Microsoft.Extensions.Options;
+
+namespace Builder.Infrastructure.Git;
+
+public sealed class BuilderStorageOptions
+{
+    /// <summary>Root folder for the git cache, artifacts and Data Protection keys.</summary>
+    public string DataDirectory { get; set; } = "data";
+}
+
+/// <summary>
+/// <see cref="IGitService"/> on top of the git CLI. Credentials are passed per command as an
+/// <c>http.extraHeader</c> and are never written to a config file.
+/// </summary>
+public sealed partial class GitCli(IOptions<BuilderStorageOptions> options) : IGitService
+{
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> RepoLocks = new();
+    private readonly string _cacheRoot = Path.GetFullPath(Path.Combine(options.Value.DataDirectory, "git-cache"));
+
+    public async Task<string> ResolveBranchAsync(GitRemote remote, string branch, CancellationToken ct)
+    {
+        if (ShaRegex().IsMatch(branch)) return branch.ToLowerInvariant();
+        var r = await RunAsync(null, remote, ct, "ls-remote", remote.Url, $"refs/heads/{branch}", $"refs/tags/{branch}");
+        if (r.ExitCode != 0) throw new InvalidOperationException($"Cannot reach repository: {r.Error}");
+        var line = r.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()
+            ?? throw new InvalidOperationException($"Branch '{branch}' does not exist in {remote.Url}.");
+        return line.Split('\t')[0].Trim();
+    }
+
+    public async Task<string?> ReadFileAsync(GitRemote remote, string branch, string commit, string path, CancellationToken ct)
+    {
+        var dir = Path.Combine(_cacheRoot, Hash(remote.Url));
+        var gate = RepoLocks.GetOrAdd(dir, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
+        {
+            if (!Directory.Exists(Path.Combine(dir, "objects")))
+            {
+                Directory.CreateDirectory(dir);
+                await RunCheckedAsync(dir, null, ct, "init", "--bare", "--quiet");
+            }
+            if ((await RunAsync(dir, null, ct, "cat-file", "-e", $"{commit}^{{commit}}")).ExitCode != 0)
+            {
+                var byCommit = await RunAsync(dir, remote, ct, "fetch", "--quiet", "--depth", "1", remote.Url, commit);
+                if (byCommit.ExitCode != 0)
+                    await RunCheckedAsync(dir, remote, ct, "fetch", "--quiet", remote.Url, $"+refs/heads/{branch}:refs/heads/{branch}");
+            }
+            var show = await RunAsync(dir, null, ct, "show", $"{commit}:{path.TrimStart('/')}");
+            if (show.ExitCode == 0) return show.Output;
+            if (show.Error.Contains("does not exist") || show.Error.Contains("exists on disk, but not in")) return null;
+            throw new InvalidOperationException($"git show failed: {show.Error}");
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    public async Task<string> CommitFileAsync(GitRemote remote, string branch, string path, string content, string message,
+        string authorName, string authorEmail, CancellationToken ct)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "builder-commit-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await RunCheckedAsync(null, remote, ct, "clone", "--quiet", "--depth", "1", "--branch", branch, "--single-branch", remote.Url, dir);
+            var file = Path.GetFullPath(Path.Combine(dir, path));
+            if (!file.StartsWith(dir + Path.DirectorySeparatorChar)) throw new InvalidOperationException("Invalid Taskfile path.");
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            await File.WriteAllTextAsync(file, content.ReplaceLineEndings("\n"), new UTF8Encoding(false), ct);
+            await RunCheckedAsync(dir, null, ct, "add", "--", path);
+            if ((await RunAsync(dir, null, ct, "diff", "--cached", "--quiet")).ExitCode != 0)
+            {
+                await RunCheckedAsync(dir, null, ct, "-c", $"user.name={authorName}", "-c", $"user.email={authorEmail}",
+                    "commit", "--quiet", "-m", message);
+                await RunCheckedAsync(dir, remote, ct, "push", "--quiet", "origin", $"HEAD:refs/heads/{branch}");
+            }
+            return (await RunCheckedAsync(dir, null, ct, "rev-parse", "HEAD")).Trim();
+        }
+        finally
+        {
+            TryDelete(dir);
+        }
+    }
+
+    private static async Task<string> RunCheckedAsync(string? cwd, GitRemote? auth, CancellationToken ct, params string[] args)
+    {
+        var r = await RunAsync(cwd, auth, ct, args);
+        if (r.ExitCode != 0) throw new InvalidOperationException($"git {args.FirstOrDefault(a => !a.StartsWith('-'))} failed: {r.Error.Trim()}");
+        return r.Output;
+    }
+
+    private static async Task<(int ExitCode, string Output, string Error)> RunAsync(string? cwd, GitRemote? auth, CancellationToken ct, params string[] args)
+    {
+        var psi = new ProcessStartInfo("git")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            WorkingDirectory = cwd ?? Path.GetTempPath(),
+        };
+        psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        psi.Environment["GCM_INTERACTIVE"] = "never";
+        if (auth?.AuthorizationHeader is { } header)
+        {
+            psi.ArgumentList.Add("-c");
+            psi.ArgumentList.Add($"http.extraHeader=Authorization: {header}");
+        }
+        foreach (var a in args) psi.ArgumentList.Add(a);
+
+        using var p = Process.Start(psi)!;
+        var stdout = p.StandardOutput.ReadToEndAsync(ct);
+        var stderr = p.StandardError.ReadToEndAsync(ct);
+        try
+        {
+            await p.WaitForExitAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            try { p.Kill(true); } catch { /* already gone */ }
+            throw;
+        }
+        return (p.ExitCode, await stdout, await stderr);
+    }
+
+    private static string Hash(string s) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(s)))[..24];
+
+    private static void TryDelete(string dir)
+    {
+        try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { /* best effort */ }
+    }
+
+    [GeneratedRegex("^[0-9a-fA-F]{40}$")]
+    private static partial Regex ShaRegex();
+}

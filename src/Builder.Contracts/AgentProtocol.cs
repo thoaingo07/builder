@@ -1,0 +1,108 @@
+namespace Builder.Contracts;
+
+/// <summary>SignalR hub route and method names shared by the API and the agents.</summary>
+public static class AgentHubNames
+{
+    public const string Route = "/hubs/agent";
+    public const string TokenHeader = "X-Agent-Token";
+
+    // agent → server
+    public const string Register = nameof(Register);
+    public const string Heartbeat = nameof(Heartbeat);
+    public const string JobStarted = nameof(JobStarted);
+    public const string JobLog = nameof(JobLog);
+    public const string JobCompleted = nameof(JobCompleted);
+    public const string CleanupCompleted = nameof(CleanupCompleted);
+    public const string TeardownCompleted = nameof(TeardownCompleted);
+
+    // server → agent
+    public const string AssignJob = nameof(AssignJob);
+    public const string CancelJob = nameof(CancelJob);
+    public const string Cleanup = nameof(Cleanup);
+    public const string Teardown = nameof(Teardown);
+}
+
+public sealed record AgentHello(
+    string Name,
+    string HostName,
+    string Os,
+    string Version,
+    int Capacity,
+    string[] Labels,
+    bool HasTask,
+    bool HasDocker,
+    bool HasKubectl,
+    bool HasAz,
+    bool HasSsh,
+    Guid[] RunningJobIds);
+
+public sealed record AgentWelcome(Guid AgentId, Guid[] JobsToAbort);
+
+public sealed record AgentMetrics(
+    double CpuPercent,
+    int CpuCount,
+    long MemoryTotalBytes,
+    long MemoryUsedBytes,
+    long DiskTotalBytes,
+    long DiskUsedBytes,
+    double LoadAverage1,
+    int RunningJobs,
+    Guid[] RunningJobIds);
+
+public enum LogStream { Out, Err, System }
+
+public sealed record LogChunk(DateTimeOffset Timestamp, LogStream Stream, string Text);
+
+public sealed record GitSource(string Url, string Branch, string Commit, string? AuthorizationHeader);
+
+public sealed record ArtifactRef(Guid ArtifactId, string Name, string DownloadPath);
+
+public enum DeployTargetType { SshDocker, Kubernetes }
+
+public sealed record DeployTarget(
+    DeployTargetType Type,
+    string EnvironmentName,
+    // ssh-docker
+    string? Host,
+    int Port,
+    string? Username,
+    string? PrivateKey,
+    // kubernetes
+    string? Kubeconfig,
+    string? AksTenantId,
+    string? AksClientId,
+    string? AksClientSecret,
+    string? AksSubscriptionId,
+    string? AksResourceGroup,
+    string? AksClusterName,
+    bool AksAdmin,
+    // what to deploy
+    string? ComposeFile,
+    string? Project,
+    string? Manifests,
+    string? Namespace,
+    string? Url);
+
+public sealed record JobAssignment(
+    Guid JobId,
+    Guid BuildId,
+    int BuildNumber,
+    string PipelineName,
+    string TaskName,
+    Dictionary<string, string> TaskVars,
+    GitSource Source,
+    string TaskfilePath,
+    Dictionary<string, string> Env,
+    string[] UploadArtifacts,
+    ArtifactRef[] DownloadArtifacts,
+    DeployTarget? Deploy);
+
+public sealed record JobResult(Guid JobId, bool Succeeded, int ExitCode, string? Error, bool Canceled);
+
+public sealed record CleanupRequest(Guid RequestId, Guid[] KeepBuildIds, bool RemoveWorkspaces, bool DockerPrune);
+
+public sealed record CleanupResult(Guid RequestId, long FreedBytes, string Output);
+
+public sealed record TeardownRequest(Guid DeploymentId, DeployTarget Target);
+
+public sealed record TeardownResult(Guid DeploymentId, bool Succeeded, string Output);

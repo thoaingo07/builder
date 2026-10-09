@@ -13,7 +13,7 @@ report hardware metrics. A **Vue** web UI, served through a BFF, shows everythin
     │            YARP proxy /api/* and /hubs/ui → API with a short-lived JWT
     ▼
  Builder.Api  ── REST, SignalR (/hubs/ui, /hubs/agent), scheduler, planner
-    │   ├── PostgreSQL (EF Core / Npgsql)
+    │   ├── PostgreSQL (EF Core / Npgsql; schema = FluentMigrator raw SQL in db/migrations)
     │   └── git clone (plan builds, commit Taskfile edits) ──► Azure DevOps Git
     ▲
     │ SignalR /hubs/agent (agent token): jobs, logs, metrics, cancel, cleanup
@@ -23,15 +23,17 @@ report hardware metrics. A **Vue** web UI, served through a BFF, shows everythin
 ## Solution layout (Clean Architecture)
 
 Dependencies point inward only: `Api/Bff/Infrastructure → Application → Domain`.
+`Contracts` is a plain DTO library the Application layer uses to talk to agents.
 
 | Project | Responsibility |
 |---|---|
 | `Builder.Domain` | Entities (Pipeline, Build, BuildJob, Agent, Environment, Deployment, Connection, Approval, User), enums, state transitions (`Build.Cancel()`, `BuildJob.Complete()`, graph promotion rules). No framework references. |
 | `Builder.Application` | Use cases (one class per command/query), ports (`IBuilderDbContext`, `IGitService`, `ITaskfilePlanner`, `IAgentGateway`, `IUiNotifier`, `ISecretProtector`, `IAzureDevOpsClient`, `IClock`), DTOs, the scheduler algorithm. |
-| `Builder.Infrastructure` | EF Core + Npgsql, migrations, git CLI, Taskfile parser (YamlDotNet), Data Protection secrets, Azure DevOps REST client, artifact file store. |
+| `Builder.Infrastructure` | EF Core + Npgsql (data access only, snake_case), git CLI, Taskfile parser (YamlDotNet), Data Protection secrets, Azure DevOps REST client, artifact file store. |
 | `Builder.Api` | Composition root: minimal-API endpoints, SignalR hubs, JWT bearer auth (issued by the BFF), agent-token auth, hosted scheduler. |
 | `Builder.Bff` | Backend-for-frontend: cookie auth, login against the API, YARP reverse proxy that swaps the cookie for a signed JWT, serves the built Vue app. |
-| `Builder.Contracts` | Agent ⇄ API wire protocol (shared by Api and Agent; nothing else). |
+| `Builder.Migrations` | Schema owner: FluentMigrator running raw SQL pairs `db/migrations/{000001}_{title}.{up,down}.sql` (embedded). Console (`up`, `down <version>`, `rollback [n]`, `status`) and library (the API migrates on startup). |
+| `Builder.Contracts` | Agent ⇄ API wire protocol (shared by Application, Api and Agent). |
 | `Builder.Agent` | Worker service: metrics, checkout, run go-task, deploy actions, artifacts, cleanup. |
 | `ui/` | Vue 3 + Vite + TypeScript + Pinia + Vue Flow. Talks only to the BFF. |
 

@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Builder.Bff": {
+      "commandName": "Project",
+      "launchBrowser": false,
+      "applicationUrl": "http://localhost:19000",
+      "environmentVariables": { "ASPNETCORE_ENVIRONMENT": "Development" }
+    }
+  }
+}

@@ -1,0 +1,122 @@
+version: '3'
+
+# Developer tasks for Builder itself. Builder can also build itself with this file: entry `ci`.
+x-builder:
+  entry: ci
+
+vars:
+  DB: 'Host=localhost;Port=15433;Database=builder;Username=builder;Password=builder'
+
+tasks:
+  default:
+    cmds:
+      - "task --list"
+
+  # ---------- database ----------
+  db:up:
+    desc: Start the dev PostgreSQL (localhost:15433)
+    cmds:
+      - "docker compose -f deploy/docker-compose.dev.yml up -d"
+
+  db:down:
+    desc: Stop the dev PostgreSQL (data is kept in a volume)
+    cmds:
+      - "docker compose -f deploy/docker-compose.dev.yml down"
+
+  migrate:up:
+    desc: 'Apply pending migrations (optionally up to a version: task migrate:up -- 3)'
+    env: { BUILDER_DB: '{{.DB}}' }
+    cmds:
+      - "dotnet run --project src/Builder.Migrations -- up {{.CLI_ARGS}}"
+
+  migrate:down:
+    desc: 'Revert down to a version: task migrate:down -- 0'
+    env: { BUILDER_DB: '{{.DB}}' }
+    requires: { vars: [CLI_ARGS] }
+    cmds:
+      - "dotnet run --project src/Builder.Migrations -- down {{.CLI_ARGS}}"
+
+  migrate:rollback:
+    desc: 'Revert the newest migration (or N: task migrate:rollback -- 2)'
+    env: { BUILDER_DB: '{{.DB}}' }
+    cmds:
+      - "dotnet run --project src/Builder.Migrations -- rollback {{.CLI_ARGS}}"
+
+  migrate:status:
+    desc: Show applied / pending migrations
+    env: { BUILDER_DB: '{{.DB}}' }
+    cmds:
+      - "dotnet run --project src/Builder.Migrations -- status"
+
+  migrate:create:
+    desc: 'New migration pair: task migrate:create -- add_build_tags'
+    requires: { vars: [CLI_ARGS] }
+    cmds:
+      - |
+        set -euo pipefail
+        title="{{.CLI_ARGS}}"
+        [[ "$title" =~ ^[a-z0-9_]+$ ]] || { echo "title must be snake_case"; exit 1; }
+        last=$(ls db/migrations/*.up.sql | sed -E 's#.*/([0-9]{6})_.*#\1#' | sort | tail -1)
+        next=$((10#$last + 1)); v=$(printf "%06d" $next)
+        echo "-- $v $title" > "db/migrations/${v}_${title}.up.sql"
+        echo "-- revert $v $title" > "db/migrations/${v}_${title}.down.sql"
+        echo "[Migration($next, \"$title\")] public sealed class M$v : SqlFileMigration;" >> src/Builder.Migrations/Migrations.cs
+        echo "created db/migrations/${v}_${title}.{up,down}.sql"
+
+  # ---------- run (each in its own terminal) ----------
+  api:
+    desc: Run Builder.Api on :19100 (migrates on startup)
+    dir: src/Builder.Api
+    cmds:
+      - "dotnet run"
+
+  bff:
+    desc: Run Builder.Bff on :19000 (serves ui/dist and proxies the API)
+    dir: src/Builder.Bff
+    cmds:
+      - "dotnet run"
+
+  agent:
+    desc: 'Run an agent: task agent -- agent-1'
+    dir: src/Builder.Agent
+    env:
+      BUILDER_AGENT_Agent__Name: '{{.CLI_ARGS | default "agent-1"}}'
+      BUILDER_AGENT_Agent__WorkDirectory: '../../data/{{.CLI_ARGS | default "agent-1"}}'
+    cmds:
+      - "dotnet run"
+
+  ui:install:
+    dir: ui
+    sources: [package.json, package-lock.json]
+    cmds:
+      - "npm ci"
+
+  ui:dev:
+    desc: Vite dev server on :19001 (proxies to the BFF on :19000)
+    dir: ui
+    deps: [ui:install]
+    cmds:
+      - "npm run dev"
+
+  # ---------- CI ----------
+  ci:
+    desc: Build and test everything
+    deps: [test, ui:build]
+
+  build:
+    desc: Build the .NET solution
+    cmds:
+      - "dotnet build Builder.slnx -c Release"
+
+  test:
+    desc: Run the .NET tests (needs Docker for the PostgreSQL tests)
+    deps: [build]
+    cmds:
+      - "dotnet test Builder.slnx -c Release --no-build"
+
+  ui:build:
+    desc: Type-check and build the UI into ui/dist
+    dir: ui
+    deps: [ui:install]
+    cmds:
+      - "npm run build"
