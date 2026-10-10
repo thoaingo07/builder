@@ -147,6 +147,13 @@ export interface AgentDto {
   name: string; hostName: string; os: string; version: string; capacity: number
   labels: string[]; enabled: boolean; online: boolean; lastSeenAt: IsoDate | null
   metrics: AgentMetricsDto | null; runningJobs: AgentRunningJob[]
+  /** work folder set in Builder (null: the agent's own default) */
+  workDirectory: string | null
+  /** the folder from the agent's own configuration */
+  defaultWorkDirectory: string | null
+  /** the folder the agent uses now, and why it could not switch */
+  effectiveWorkDirectory: string | null
+  workDirectoryError: string | null
 }
 
 export type EnvironmentType = 'SshDocker' | 'Kubernetes'

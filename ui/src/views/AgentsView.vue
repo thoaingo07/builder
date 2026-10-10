@@ -9,6 +9,8 @@ import { useNotify } from '@/composables/useNotify'
 import { useConfirm } from '@/composables/useConfirm'
 import AgentCard from '@/components/AgentCard.vue'
 import AgentCleanupModal from '@/components/AgentCleanupModal.vue'
+import AgentWorkFolderModal from '@/components/AgentWorkFolderModal.vue'
+import { useAuthStore } from '@/stores/auth'
 import AgentTokenModal from '@/components/org/AgentTokenModal.vue'
 import { useOrgStore } from '@/stores/org'
 
@@ -22,9 +24,12 @@ const org = useOrgStore()
 const tokenOpen = ref(false)
 const token = ref<string | null>(null)
 const regenerating = ref(false)
+const folderOpen = ref(false)
+const folderAgent = ref<AgentDto | null>(null)
+const auth = useAuthStore()
 
-/** Shared agents belong to the operator; only org admins manage their own agents. */
-const manageable = (a: AgentDto) => org.isAdmin && !a.shared
+/** Org admins manage their organization's agents; Builder admins also enable/disable and set the folder of shared ones. */
+const manageable = (a: AgentDto) => org.isAdmin && (!a.shared || !!auth.user?.isAdmin)
 
 function addAgent() {
   token.value = null
@@ -77,9 +82,10 @@ function menu(a: AgentDto): DropdownMenuItem[][] {
   return [
     [
       { label: a.enabled ? 'Disable' : 'Enable', icon: a.enabled ? 'i-lucide-pause' : 'i-lucide-play', onSelect: () => void toggle(a) },
-      { label: 'Clean up…', icon: 'i-lucide-brush-cleaning', disabled: !a.online, onSelect: () => { cleanupAgent.value = a; cleanupOpen.value = true } },
+      { label: 'Work folder…', icon: 'i-lucide-folder-cog', onSelect: () => { folderAgent.value = a; folderOpen.value = true } },
+      ...(a.shared ? [] : [{ label: 'Clean up…', icon: 'i-lucide-brush-cleaning', disabled: !a.online, onSelect: () => { cleanupAgent.value = a; cleanupOpen.value = true } }]),
     ],
-    [{ label: 'Remove', icon: 'i-lucide-trash-2', color: 'error', disabled: a.online, onSelect: () => void remove(a) }],
+    ...(a.shared ? [] : [[{ label: 'Remove', icon: 'i-lucide-trash-2', color: 'error' as const, disabled: a.online, onSelect: () => void remove(a) }]]),
   ]
 }
 
@@ -120,6 +126,7 @@ onMounted(load)
         </AgentCard>
       </div>
       <AgentCleanupModal v-model:open="cleanupOpen" :agent="cleanupAgent" />
+      <AgentWorkFolderModal v-model:open="folderOpen" :agent="folderAgent" @saved="u => live.setAgents(live.agents.map(x => (x.id === u.id ? u : x)))" />
       <AgentTokenModal v-model:open="tokenOpen" :token="token" :org-name="org.current?.name ?? ''" :title="token ? 'New agent token' : 'Add an agent'" />
     </template>
   </UDashboardPanel>

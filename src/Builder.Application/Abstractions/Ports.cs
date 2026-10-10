@@ -111,6 +111,8 @@ public interface IAgentGateway
     Task ReleaseBuildAsync(Guid agentId, Guid buildId, CancellationToken ct);
     /// <summary>Null when the agent is gone or did not answer in time.</summary>
     Task<EnvironmentTestResult?> TestEnvironmentAsync(Guid agentId, EnvironmentTestRequest request, CancellationToken ct);
+    /// <summary>Null when the agent is offline or did not answer.</summary>
+    Task<AgentSettingsResult?> ApplySettingsAsync(Guid agentId, AgentSettings settings, CancellationToken ct);
 }
 
 /// <summary>Live updates for the UI; organization-wide events only reach that organization's members.</summary>

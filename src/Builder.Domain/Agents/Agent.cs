@@ -16,6 +16,13 @@ public sealed class Agent
     public string? ConnectionId { get; private set; }
     public DateTimeOffset? LastSeenAt { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
+    /// <summary>Work folder set in Builder (null: the agent's own default).</summary>
+    public string? WorkDirectory { get; private set; }
+    /// <summary>The work folder from the agent's configuration, as it reported when connecting.</summary>
+    public string? DefaultWorkDirectory { get; private set; }
+    /// <summary>The work folder the agent uses now, and why it could not switch to <see cref="WorkDirectory"/>.</summary>
+    public string? EffectiveWorkDirectory { get; private set; }
+    public string? WorkDirectoryError { get; private set; }
 
     private Agent() { }
 
@@ -49,6 +56,24 @@ public sealed class Agent
     }
 
     public void SetEnabled(bool enabled) => Enabled = enabled;
+
+    /// <summary>Empty or whitespace: back to the agent's own default.</summary>
+    public void SetWorkDirectory(string? path)
+    {
+        var p = string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+        if (p is not null && !(p.StartsWith('/') || p.StartsWith('~') || (p.Length > 2 && p[1] == ':')))
+            throw new DomainException("The work folder must be an absolute path (e.g. /srv/builder or D:\\builder).");
+        if (p is "/" or "~" or "~/") throw new DomainException("Pick a dedicated folder, not / or the home folder.");
+        WorkDirectory = p;
+    }
+
+    public void ReportedDefaultWorkDirectory(string? path) => DefaultWorkDirectory = path;
+
+    public void WorkDirectoryApplied(string effective, string? error)
+    {
+        EffectiveWorkDirectory = effective;
+        WorkDirectoryError = error;
+    }
 
     /// <summary>Shared agents serve every organization; others only their own.</summary>
     public bool Serves(Guid orgId) => OrgId is null || OrgId == orgId;

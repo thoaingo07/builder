@@ -141,10 +141,13 @@ type AgentMetricsDto = {
   diskTotalBytes: number; diskUsedBytes: number; loadAverage1: number; runningJobs: number
 }
 type AgentDto = {
-  id; shared: boolean                         // shared = serves every organization; not manageable from the org
+  id; shared: boolean                         // shared = serves every organization; only Builder admins change it
   name; hostName; os; version; capacity: number; labels: string[]
   enabled: boolean; online: boolean; lastSeenAt: string|null
   metrics: AgentMetricsDto|null; runningJobs: { buildId; buildNumber; pipelineName; jobId; taskName }[]  // this org's only
+  workDirectory: string|null                  // set in Builder; null = the agent's own default
+  defaultWorkDirectory: string|null           // from the agent's configuration
+  effectiveWorkDirectory: string|null; workDirectoryError: string|null   // what it uses now / why it could not switch
 }
 
 type EnvironmentType = 'SshDocker'|'Kubernetes'   // SshDocker = a server reached over SSH that already has Docker (or Podman)
@@ -227,7 +230,7 @@ Current organization (`X-Org` required):
 | GET | `/builds/{id}/jobs/{jobId}/logs?after=0` | `LogLineDto[]` | |
 | GET | `/artifacts/{id}` | file download | |
 | GET | `/agents` | `AgentDto[]` (own + shared) | |
-| PUT/DELETE | `/agents/{id}` | `{ enabled }` → `AgentDto` / 204 (own agents only) | Admin |
+| PUT/DELETE | `/agents/{id}` | `{ enabled, workDirectory? }` → `AgentDto` / 204. `workDirectory`: omitted = unchanged, `""` = the agent's default, else an absolute path the online agent switches to for new jobs (the result says if it could). Own agents; shared ones (PUT only) for Builder admins | Admin |
 | GET | `/agents/{id}/metrics` | `AgentMetricsDto[]` | |
 | POST | `/agents/{id}/cleanup` | `{ removeWorkspaces, dockerPrune }` → 202 | Admin |
 | GET/POST, PUT/DELETE | `/environments`, `/environments/{id}` | as before | /Admin |

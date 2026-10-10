@@ -86,6 +86,7 @@ public sealed class AgentHub(AgentService agents, SecretService secrets, Credent
     public Task JobLog(Guid jobId, List<LogChunk> lines) => agents.JobLogAsync(jobId, lines, Context.ConnectionAborted);
     public Task JobCompleted(JobResult result) => agents.JobCompletedAsync(result, CancellationToken.None);
     public Task TeardownCompleted(TeardownResult result) => agents.TeardownCompletedAsync(result, CancellationToken.None);
+    public Task SettingsApplied(AgentSettingsResult result) => agents.SettingsAppliedAsync(AgentId, result, CancellationToken.None);
     public Task CleanupCompleted(CleanupResult result) => Task.CompletedTask;
 
     /// <summary>Secret values for a job this agent is running (checked server-side).</summary>
@@ -111,6 +112,22 @@ public sealed class SignalRAgentGateway(IHubContext<AgentHub> hub, AgentConnecti
     : IAgentGateway
 {
     public bool IsConnected(Guid agentId) => connections.Get(agentId) is not null;
+
+    public async Task<AgentSettingsResult?> ApplySettingsAsync(Guid agentId, AgentSettings settings, CancellationToken ct)
+    {
+        if (connections.Get(agentId) is not { } connectionId) return null;
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            return await hub.Clients.Client(connectionId).InvokeAsync<AgentSettingsResult>(AgentHubNames.ApplySettings, settings, timeout.Token);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            log.LogWarning(ex, "Agent {Agent} did not apply its settings", agentId);
+            return null;
+        }
+    }
 
     public async Task<EnvironmentTestResult?> TestEnvironmentAsync(Guid agentId, EnvironmentTestRequest request, CancellationToken ct)
     {

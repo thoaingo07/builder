@@ -48,6 +48,13 @@ const slots = computed(() => `${props.agent.runningJobs.length}/${props.agent.ca
       {{ agent.online ? 'Waiting for metrics…' : `Offline · last seen ${relativeTime(agent.lastSeenAt)}` }}
     </div>
 
+    <div v-if="agent.effectiveWorkDirectory" class="flex min-w-0 items-center gap-1.5 text-xs text-muted">
+      <UIcon name="i-lucide-folder" class="size-3.5 shrink-0" />
+      <span class="truncate font-mono" :title="agent.effectiveWorkDirectory">{{ agent.effectiveWorkDirectory }}</span>
+      <UBadge v-if="!agent.workDirectory" label="default" color="neutral" variant="soft" size="sm" class="shrink-0" />
+    </div>
+    <UAlert v-if="agent.workDirectoryError" color="warning" variant="subtle" icon="i-lucide-triangle-alert" :description="agent.workDirectoryError" :ui="{ description: 'text-xs break-all' }" />
+
     <div v-if="agent.labels.length" class="flex flex-wrap gap-1">
       <UBadge v-for="l in agent.labels" :key="l" :label="l" color="neutral" variant="soft" size="sm" class="font-mono" />
     </div>
