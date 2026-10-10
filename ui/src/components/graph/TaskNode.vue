@@ -13,7 +13,7 @@ defineProps<{ task: TaskModel; selected: boolean; entry: boolean; reachable: boo
       reachable ? '' : 'opacity-45',
     ]"
   >
-    <Handle type="target" :position="direction === 'LR' ? Position.Left : Position.Top" />
+    <Handle type="target" :position="direction === 'LR' ? Position.Left : Position.Top" :connectable="false" />
     <div class="flex items-center gap-1.5">
       <UIcon v-if="entry" name="i-lucide-flag" class="size-3.5 shrink-0 text-primary" />
       <span class="truncate font-mono text-sm font-semibold text-highlighted">{{ task.name }}</span>
@@ -30,6 +30,6 @@ defineProps<{ task: TaskModel; selected: boolean; entry: boolean; reachable: boo
     <div v-if="task.labels.length" class="mt-1 flex flex-wrap gap-1">
       <span v-for="l in task.labels" :key="l" class="rounded bg-elevated px-1 font-mono text-[10px] text-toned">{{ l }}</span>
     </div>
-    <Handle type="source" :position="direction === 'LR' ? Position.Right : Position.Bottom" />
+    <Handle type="source" :position="direction === 'LR' ? Position.Right : Position.Bottom" :connectable="false" />
   </div>
 </template>

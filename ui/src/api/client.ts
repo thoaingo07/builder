@@ -103,8 +103,6 @@ export const api = {
     update: (id: Guid, input: PipelineInput) => put<PipelineDto>(`/api/pipelines/${id}`, input),
     remove: (id: Guid) => del(`/api/pipelines/${id}`),
     taskfile: (id: Guid, branch?: string) => get<TaskfileDto>(`/api/pipelines/${id}/taskfile`, { branch }),
-    saveTaskfile: (id: Guid, branch: string, content: string, message: string) =>
-      put<TaskfileDto>(`/api/pipelines/${id}/taskfile`, { branch, content, message }),
     plan: (content: string, entryTask?: string | null) =>
       post<PlanPreviewDto>('/api/pipelines/plan', { content, entryTask: entryTask || null }),
     triggers: (id: Guid) => get<PipelineTriggersDto>(`/api/pipelines/${id}/triggers`),

@@ -219,8 +219,10 @@ onMounted(load)
               </UFormField>
               <UAlert v-if="isAzure" color="neutral" variant="subtle" icon="i-lucide-info" title="PAT scopes">
                 <template #description>
-                  Create it under <em>User settings → Personal access tokens</em> with scope <strong>Code: Read</strong>.
-                  Choose <strong>Code: Read &amp; write</strong> if you want to save Taskfile edits from the runner editor (Builder commits and pushes them).
+                  Create it under <em>User settings → Personal access tokens</em> with <strong>Code → Read</strong> and
+                  <strong>Code → Status</strong> (build results on commits and pull requests).
+                  Add <strong>Service hooks → Read &amp; write</strong> only if you use “Install in Azure DevOps” on a repository
+                  (it is under <em>Show all scopes</em> in the PAT dialog). Builder never writes to your repositories.
                 </template>
               </UAlert>
             </template>

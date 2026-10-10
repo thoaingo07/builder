@@ -1,77 +1,78 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { onBeforeRouteLeave } from 'vue-router'
-import type { Document } from 'yaml'
+import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import type { TabsItem } from '@nuxt/ui'
 import { api, ApiError } from '@/api/client'
-import type { ConnectionDto, EnvironmentDto, PipelineDto, PlanPreviewDto } from '@/api/types'
+import type { PipelineDto, PlanPreviewDto, TriggerSpec } from '@/api/types'
 import * as tf from '@/lib/taskfile'
-import { debounce } from '@/lib/collections'
 import { shortSha } from '@/lib/format'
+import { repoFileUrl } from '@/lib/repoLinks'
 import { useNotify } from '@/composables/useNotify'
-import { useConfirm } from '@/composables/useConfirm'
+import { useCopy } from '@/composables/useClipboard'
 import CodeEditor from '@/components/CodeEditor.vue'
-import TaskGraphEditor from '@/components/graph/TaskGraphEditor.vue'
-import TaskForm from '@/components/pipelines/TaskForm.vue'
-import TriggersForm from '@/components/pipelines/TriggersForm.vue'
+import TaskGraph from '@/components/graph/TaskGraph.vue'
+import TaskDetails from '@/components/pipelines/TaskDetails.vue'
+import TriggersView from '@/components/pipelines/TriggersView.vue'
+import RunPipelineModal from '@/components/pipelines/RunPipelineModal.vue'
 
+// Read-only view of a runner file. Builder never writes to repositories: files are changed there.
 const props = defineProps<{ id: string }>()
 
 const notify = useNotify()
-const confirm = useConfirm()
+const copy = useCopy()
 
 const pipeline = ref<PipelineDto | null>(null)
-const environments = ref<EnvironmentDto[]>([])
-const secretNames = ref<string[]>([])
-const connections = ref<ConnectionDto[]>([])
+const branches = ref<string[]>([])
 const branch = ref('')
 const loadedBranch = ref('')
 const commit = ref<string | null>(null)
 const content = ref('')
-const baseline = ref('')
 const missingFile = ref(false)
 const loading = ref(true)
 const loadError = ref<string | null>(null)
+const runOpen = ref(false)
 
 const tab = ref<'visual' | 'yaml'>('visual')
 const tabs: TabsItem[] = [
-  { label: 'Visual', icon: 'i-lucide-workflow', value: 'visual' },
+  { label: 'Graph', icon: 'i-lucide-workflow', value: 'visual' },
   { label: 'YAML', icon: 'i-lucide-file-code', value: 'yaml' },
 ]
-
 const selected = ref<string | null>(null)
-const graph = ref<InstanceType<typeof TaskGraphEditor> | null>(null)
 
 // ---------- parsed model ----------
-const doc = shallowRef<Document>(tf.parse(''))
+const EMPTY: tf.TaskfileModel = { version: '3', entry: '', triggers: { push: null, pullRequest: null, schedules: [], error: null }, tasks: [] }
+const doc = shallowRef(tf.parse(''))
 watch(content, c => { doc.value = tf.parse(c) }, { immediate: true })
 const parseErrors = computed(() => tf.errorsOf(doc.value))
-const lastGood = shallowRef<tf.TaskfileModel>({ version: '3', entry: '', triggers: { push: null, pullRequest: null, schedules: [], error: null }, tasks: [] })
-const model = computed<tf.TaskfileModel>(() => {
-  if (parseErrors.value.length) return lastGood.value
-  const m = tf.read(doc.value)
-  lastGood.value = m
-  return m
-})
+const model = computed<tf.TaskfileModel>(() => (parseErrors.value.length ? EMPTY : tf.read(doc.value)))
 const effectiveEntry = computed(() => pipeline.value?.entryTask || model.value.entry || 'default')
-const taskNames = computed(() => model.value.tasks.map(t => t.name))
 const selectedTask = computed(() => model.value.tasks.find(t => t.name === selected.value) ?? null)
-const dirty = computed(() => content.value !== baseline.value)
-
-// ---------- server validation ----------
-const plan = ref<PlanPreviewDto | null>(null)
-const planning = ref(false)
-const validate = debounce(async () => {
-  if (parseErrors.value.length || !content.value.trim()) { plan.value = null; return }
-  planning.value = true
-  try { plan.value = await api.pipelines.plan(content.value, effectiveEntry.value) } catch (e) { notify.error(e, 'Validation failed') } finally { planning.value = false }
-}, 700)
-watch([content, effectiveEntry], () => validate())
-
 const reachable = computed(() => {
   if (plan.value && !plan.value.error) return new Set(plan.value.jobs.map(j => j.taskName))
   return tf.reachable(model.value, effectiveEntry.value)
 })
+
+/** the file's triggers in the API's shape, for the shared triggers view */
+const triggerSpec = computed<TriggerSpec>(() => {
+  const t = model.value.triggers
+  const vars = (kv: tf.KeyValue[]) => Object.fromEntries(kv.map(v => [v.key, v.value]))
+  return {
+    push: t.push && { branches: t.push.branches, paths: t.push.paths, vars: vars(t.push.vars) },
+    pullRequest: t.pullRequest && { branches: t.pullRequest.branches, paths: t.pullRequest.paths, vars: vars(t.pullRequest.vars) },
+    schedules: t.schedules.map(s => ({ cron: s.cron, branch: s.branch, timeZone: s.timeZone, vars: vars(s.vars) })),
+  }
+})
+
+const repoLink = computed(() => pipeline.value ? repoFileUrl(pipeline.value.repositoryUrl, pipeline.value.taskfilePath, loadedBranch.value || pipeline.value.defaultBranch) : null)
+
+// ---------- server validation (plan preview; nothing is written) ----------
+const plan = ref<PlanPreviewDto | null>(null)
+const planning = ref(false)
+async function validate() {
+  plan.value = null
+  if (parseErrors.value.length || !content.value.trim()) return
+  planning.value = true
+  try { plan.value = await api.pipelines.plan(content.value, effectiveEntry.value) } catch (e) { notify.error(e, 'Validation failed') } finally { planning.value = false }
+}
 const status = computed(() => {
   if (parseErrors.value.length) return { color: 'error' as const, icon: 'i-lucide-circle-x', text: 'YAML error' }
   if (planning.value) return { color: 'neutral' as const, icon: 'i-lucide-loader-circle', text: 'Validating…' }
@@ -80,125 +81,36 @@ const status = computed(() => {
   return { color: 'neutral' as const, icon: 'i-lucide-circle-dashed', text: 'Not validated' }
 })
 
-// ---------- edits ----------
-function mutate(fn: (d: Document) => void) {
-  if (parseErrors.value.length) { notify.error(new Error('Fix the YAML errors first.'), 'Cannot edit visually'); return }
-  const d = tf.parse(content.value)
-  try {
-    fn(d)
-    content.value = tf.toYaml(d)
-  } catch (e) {
-    notify.error(e, 'Edit failed')
-  }
-}
-
-const newTaskOpen = ref(false)
-const newTaskName = ref('')
-const newTaskError = computed(() => {
-  const n = newTaskName.value.trim()
-  if (!n) return null
-  if (!tf.TASK_NAME.test(n)) return 'Letters, digits, _ . : - only'
-  if (taskNames.value.includes(n)) return 'Already exists'
-  return null
-})
-function addTask() {
-  const n = newTaskName.value.trim()
-  if (!n || newTaskError.value) return
-  mutate(d => tf.addTask(d, n, selected.value ? [selected.value] : []))
-  selected.value = n
-  newTaskName.value = ''
-  newTaskOpen.value = false
-}
-
-function rename(from: string, to: string) {
-  mutate(d => tf.renameTask(d, from, to))
-  selected.value = to
-}
-
-async function removeTask(name: string) {
-  if (!await confirm({ title: 'Delete task', message: `Delete "${name}"? It is also removed from other tasks' deps.`, confirmLabel: 'Delete', danger: true })) return
-  mutate(d => tf.deleteTask(d, name))
-  selected.value = null
-}
-
-const connect = (dep: string, task: string) => mutate(d => tf.addDep(d, task, dep))
-const disconnect = (dep: string, task: string) => mutate(d => tf.removeDep(d, task, dep))
-const makeEntry = (name: string) => mutate(d => tf.setEntry(d, name))
-
-const entryItems = computed(() => taskNames.value.map(n => ({ label: n, value: n })))
-const entryModel = computed({
-  get: () => model.value.entry || undefined,
-  set: (v: string | undefined) => mutate(d => tf.setEntry(d, v ?? '')),
-})
-
-// ---------- load / save ----------
+// ---------- load ----------
 async function load(b?: string) {
   loading.value = true
   loadError.value = null
   missingFile.value = false
   try {
-    const tfDto = await api.pipelines.taskfile(props.id, b || undefined)
-    branch.value = loadedBranch.value = tfDto.branch
-    commit.value = tfDto.commit
-    content.value = baseline.value = tfDto.content
+    const dto = await api.pipelines.taskfile(props.id, b || undefined)
+    branch.value = loadedBranch.value = dto.branch
+    commit.value = dto.commit
+    content.value = dto.content
   } catch (e) {
+    content.value = ''
+    commit.value = null
     if (e instanceof ApiError && e.status === 404) {
       missingFile.value = true
       loadedBranch.value = branch.value = b || pipeline.value?.defaultBranch || 'main'
-      commit.value = null
-      // don't silently fill in a template: the user decides (see the empty state)
-      content.value = baseline.value = ''
     } else {
       loadError.value = e instanceof ApiError ? (e.problem.detail ?? e.message) : (e as Error).message
     }
   } finally {
     loading.value = false
-    selected.value = null
-    validate()
+    if (selected.value && !model.value.tasks.some(t => t.name === selected.value)) selected.value = null
+    void validate()
   }
 }
 
-function startFromTemplate() {
-  content.value = tf.STARTER
-}
-
-async function reload() {
-  if (dirty.value && !await confirm({ title: 'Discard changes', message: 'Reloading discards your unsaved edits.', confirmLabel: 'Discard', danger: true })) return
-  await load(branch.value.trim())
-}
-
-const saveOpen = ref(false)
-const saveMessage = ref('')
-const saving = ref(false)
-function openSave() {
-  saveMessage.value = `Update ${pipeline.value?.taskfilePath ?? 'Taskfile.yml'} via Builder`
-  saveOpen.value = true
-}
-async function save() {
-  if (!saveMessage.value.trim()) return
-  saving.value = true
-  try {
-    const res = await api.pipelines.saveTaskfile(props.id, loadedBranch.value, content.value, saveMessage.value.trim())
-    commit.value = res.commit
-    baseline.value = content.value
-    missingFile.value = false
-    saveOpen.value = false
-    notify.success('Taskfile committed', `${shortSha(res.commit)} on ${res.branch}`)
-  } catch (e) {
-    notify.error(e, 'Commit failed')
-  } finally {
-    saving.value = false
-  }
-}
-
-onBeforeRouteLeave(async () => {
-  if (!dirty.value) return true
-  return await confirm({ title: 'Unsaved changes', message: 'Leave the editor and discard your changes?', confirmLabel: 'Leave', danger: true })
-})
-function beforeUnload(e: BeforeUnloadEvent) { if (dirty.value) e.preventDefault() }
+let ready = false
+watch(branch, b => { if (ready && b && b !== loadedBranch.value) void load(b) })
 
 onMounted(async () => {
-  window.addEventListener('beforeunload', beforeUnload)
   try {
     pipeline.value = await api.pipelines.get(props.id)
   } catch (e) {
@@ -206,32 +118,32 @@ onMounted(async () => {
     loading.value = false
     return
   }
-  void api.environments.list().then(r => { environments.value = r }).catch(() => undefined)
-  void api.secrets.list().then(r => { secretNames.value = r.map(x => x.name) }).catch(() => undefined)
-  void api.connections.list().then(r => { connections.value = r }).catch(() => undefined)
+  void api.repositories.branches(pipeline.value.repositoryId).then(r => { branches.value = r }).catch(() => undefined)
   await load(pipeline.value.defaultBranch)
+  ready = true
 })
-onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
 </script>
 
 <template>
-  <UDashboardPanel id="pipeline-editor" :ui="{ body: 'p-0 sm:p-0 gap-0 overflow-hidden' }">
+  <UDashboardPanel id="runner-file" :ui="{ body: 'p-0 sm:p-0 gap-0 overflow-hidden' }">
     <template #header>
       <UDashboardNavbar :title="pipeline ? `${pipeline.name} · runner file` : 'Runner file'">
         <template #leading>
           <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" to="/pipelines" aria-label="Back to runners" />
         </template>
-        <template #trailing>
-          <UBadge v-if="dirty" color="warning" variant="subtle" label="Unsaved" size="sm" />
-        </template>
         <template #right>
-          <UButton icon="i-lucide-git-commit-horizontal" label="Commit" :disabled="!dirty || parseErrors.length > 0" @click="openSave" />
+          <UButton v-if="repoLink" :to="repoLink" target="_blank" icon="i-lucide-external-link" label="Open in repository" color="neutral" variant="outline" />
+          <UButton v-if="pipeline" icon="i-lucide-play" label="Run" @click="runOpen = true" />
         </template>
       </UDashboardNavbar>
       <UDashboardToolbar>
         <template #left>
-          <UInput v-model="branch" icon="i-lucide-git-branch" size="sm" class="w-44" @keydown.enter="reload" />
-          <UButton icon="i-lucide-refresh-cw" size="sm" color="neutral" variant="ghost" aria-label="Reload from git" :loading="loading" @click="reload" />
+          <USelectMenu
+            v-if="branches.length" v-model="branch" :items="branches" icon="i-lucide-git-branch" size="sm" class="w-48"
+            :create-item="{ position: 'bottom' }" @create="(b: string) => { branches.push(b); branch = b }"
+          />
+          <UInput v-else v-model.lazy="branch" icon="i-lucide-git-branch" size="sm" class="w-48" @keydown.enter="load(branch)" />
+          <UButton icon="i-lucide-refresh-cw" size="sm" color="neutral" variant="ghost" aria-label="Reload from git" :loading="loading" @click="load(branch)" />
           <span v-if="commit" class="font-mono text-xs text-muted">{{ shortSha(commit) }}</span>
           <span class="hidden font-mono text-xs text-dimmed md:inline">{{ pipeline?.repositoryName }} · {{ pipeline?.taskfilePath }}</span>
         </template>
@@ -245,102 +157,73 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
     </template>
 
     <template #body>
-      <div v-if="loading && !content" class="p-6"><USkeleton class="h-96 w-full" /></div>
+      <UAlert
+        v-if="pipeline" color="info" variant="subtle" icon="i-lucide-info" class="rounded-none"
+        title="Runner files are changed in the repository"
+      >
+        <template #description>
+          <code>{{ pipeline.taskfilePath }}</code> on <code>{{ loadedBranch || pipeline.defaultBranch }}</code>. Builder reads them; it never writes to your code.
+          <a v-if="repoLink" :href="repoLink" target="_blank" rel="noopener" class="ml-1 font-medium underline">Open in repository</a>
+        </template>
+      </UAlert>
+
+      <div v-if="loading && !content && !missingFile" class="p-6"><USkeleton class="h-96 w-full" /></div>
       <div v-else-if="loadError" class="p-6">
-        <UEmpty icon="i-lucide-circle-alert" title="Could not load the Taskfile" :description="loadError" :actions="[{ label: 'Retry', icon: 'i-lucide-refresh-cw', onClick: () => load(branch) }]" />
+        <UEmpty icon="i-lucide-circle-alert" title="Could not load the runner file" :description="loadError" :actions="[{ label: 'Retry', icon: 'i-lucide-refresh-cw', onClick: () => load(branch) }]" />
       </div>
-      <div v-else-if="missingFile && !content" class="p-6">
+      <div v-else-if="missingFile" class="p-6">
         <UEmpty
           icon="i-lucide-file-x-2" :title="`${pipeline?.taskfilePath} does not exist on ${loadedBranch}`"
-          description="The runner is mapped to this file, but the branch doesn't contain it. Pick another branch above, or create the file from a starter template and commit it to this branch."
-          :actions="[
-            { label: 'Create from starter template', icon: 'i-lucide-file-plus', onClick: startFromTemplate },
-            { label: 'Default branch', icon: 'i-lucide-git-branch', color: 'neutral', variant: 'outline', onClick: () => load(pipeline?.defaultBranch) },
-          ]"
+          description="The runner is mapped to this file, but this branch doesn't contain it. Pick another branch, or add the file in the repository."
+          :actions="loadedBranch !== pipeline?.defaultBranch ? [{ label: `Show ${pipeline?.defaultBranch}`, icon: 'i-lucide-git-branch', color: 'neutral', variant: 'outline', onClick: () => { branch = pipeline!.defaultBranch } }] : []"
         />
       </div>
       <template v-else>
-        <UAlert
-          v-if="missingFile" color="info" variant="subtle" icon="i-lucide-file-plus" class="rounded-none"
-          :title="`New file: ${pipeline?.taskfilePath} on ${loadedBranch}`" description="Started from the starter template — commit to create it in the repository."
-        />
-        <UAlert
-          v-if="plan?.error" color="error" variant="subtle" icon="i-lucide-circle-x" class="rounded-none" title="Runner file is invalid" :description="plan.error"
-        />
-        <UAlert
-          v-if="parseErrors.length" color="error" variant="subtle" icon="i-lucide-file-x" class="rounded-none"
-          title="YAML syntax error — the visual editor shows the last valid version" :description="parseErrors[0]"
-        />
+        <UAlert v-if="plan?.error" color="error" variant="subtle" icon="i-lucide-circle-x" class="rounded-none" title="Runner file is invalid" :description="plan.error" />
+        <UAlert v-if="parseErrors.length" color="error" variant="subtle" icon="i-lucide-file-x" class="rounded-none" title="YAML syntax error" :description="parseErrors[0]" />
 
         <div v-show="tab === 'visual'" class="flex min-h-0 flex-1 flex-col lg:flex-row">
           <div class="relative min-h-[420px] flex-1">
-            <div class="absolute top-3 left-3 z-10 flex flex-wrap items-center gap-2">
-              <UPopover v-model:open="newTaskOpen">
-                <UButton icon="i-lucide-plus" label="Add task" size="sm" />
-                <template #content>
-                  <form class="w-64 space-y-2 p-3" @submit.prevent="addTask">
-                    <UFormField label="Task name" :error="newTaskError ?? undefined" :help="selected ? `Will depend on ${selected}` : undefined">
-                      <UInput v-model="newTaskName" class="w-full font-mono" autofocus placeholder="build" />
-                    </UFormField>
-                    <UButton type="submit" block size="sm" label="Add" :disabled="!newTaskName.trim() || !!newTaskError" />
-                  </form>
-                </template>
-              </UPopover>
-              <UButton icon="i-lucide-layout-grid" label="Auto layout" size="sm" color="neutral" variant="outline" class="bg-default" @click="graph?.autoLayout()" />
-              <USelectMenu
-                v-model="entryModel" :items="entryItems" value-key="value" size="sm" class="w-48 bg-default"
-                icon="i-lucide-flag" placeholder="x-builder.entry"
-              />
-            </div>
             <div v-if="!model.tasks.length" class="absolute inset-0 flex items-center justify-center">
-              <UEmpty icon="i-lucide-workflow" title="No tasks" description="Add a task to start building the runner." variant="naked" />
+              <UEmpty icon="i-lucide-workflow" title="No tasks" description="This file defines no tasks." variant="naked" />
             </div>
-            <TaskGraphEditor
-              ref="graph" :model="model" :entry="model.entry || effectiveEntry" :reachable="reachable" :selected="selected"
-              @select="n => (selected = n)"
-              @connect="connect" @disconnect="disconnect"
-            />
-            <UTooltip text="Drag from a task's right handle onto another task to add a dependency. Click an edge and press Delete to remove it.">
-              <UButton icon="i-lucide-circle-help" color="neutral" variant="ghost" size="sm" class="absolute top-3 right-3 z-10" aria-label="Graph editing help" />
-            </UTooltip>
+            <TaskGraph v-else :model="model" :entry="effectiveEntry" :reachable="reachable" :selected="selected" @select="n => (selected = n)" />
           </div>
           <aside class="max-h-[60vh] w-full overflow-y-auto border-t border-default p-4 lg:max-h-none lg:w-96 lg:border-t-0 lg:border-l">
-            <TaskForm
-              v-if="selectedTask" :task="selectedTask" :task-names="taskNames" :environments="environments" :secret-names="secretNames" :connections="connections"
-              :is-entry="model.entry === selectedTask.name"
-              @mutate="mutate" @rename="rename" @remove="removeTask" @set-entry="makeEntry"
-            />
-            <div v-else class="space-y-4">
+            <template v-if="selectedTask">
+              <UButton icon="i-lucide-arrow-left" label="Runner overview" size="xs" color="neutral" variant="link" class="mb-3 px-0" @click="selected = null" />
+              <TaskDetails :task="selectedTask" :is-entry="selectedTask.name === effectiveEntry" :reachable="reachable.has(selectedTask.name)" @select="n => (selected = n)" />
+            </template>
+            <div v-else class="space-y-5">
               <div>
-                <h3 class="flex items-center gap-2 font-semibold text-highlighted"><UIcon name="i-lucide-zap" class="text-muted" />Triggers</h3>
-                <p class="mt-1 text-xs text-muted">
-                  <code>x-builder.triggers</code> — read from {{ pipeline?.defaultBranch }} after you commit.
-                  Click a task in the graph to edit its steps, dependencies, approval and deployment.
-                </p>
+                <h3 class="font-semibold text-highlighted">Overview</h3>
+                <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                  <dt class="text-muted">Entry task</dt>
+                  <dd class="font-mono">{{ effectiveEntry }} <span v-if="pipeline?.entryTask" class="font-sans text-muted">(runner setting)</span></dd>
+                  <dt class="text-muted">Tasks</dt>
+                  <dd>{{ model.tasks.length }} · {{ reachable.size }} run by a build</dd>
+                </dl>
+                <p class="mt-2 text-xs text-muted">Click a task in the graph to see its steps, variables, inputs and Builder settings.</p>
               </div>
-              <TriggersForm :triggers="model.triggers" :default-branch="pipeline?.defaultBranch ?? 'main'" @mutate="mutate" />
+              <div class="space-y-2">
+                <h3 class="flex items-center gap-2 font-semibold text-highlighted"><UIcon name="i-lucide-zap" class="text-muted" />Triggers <code class="text-xs font-normal text-muted">x-builder.triggers</code></h3>
+                <UAlert v-if="model.triggers.error" color="error" variant="subtle" icon="i-lucide-circle-x" :title="model.triggers.error" />
+                <TriggersView v-else :spec="triggerSpec" :default-branch="pipeline?.defaultBranch ?? 'main'" />
+              </div>
             </div>
           </aside>
         </div>
 
-        <div v-show="tab === 'yaml'" class="min-h-[420px] flex-1">
-          <CodeEditor v-model="content" />
+        <div v-show="tab === 'yaml'" class="relative min-h-[420px] flex-1">
+          <UButton
+            icon="i-lucide-copy" label="Copy" size="xs" color="neutral" variant="outline" class="absolute top-2 right-4 z-10 bg-default"
+            @click="copy(content, 'Runner file copied')"
+          />
+          <CodeEditor :model-value="content" readonly />
         </div>
       </template>
 
-      <UModal v-model:open="saveOpen" title="Commit Taskfile" :description="`Pushes ${pipeline?.taskfilePath} to ${loadedBranch}.`">
-        <template #body>
-          <UFormField label="Commit message" required>
-            <UTextarea v-model="saveMessage" :rows="3" autoresize class="w-full" autofocus />
-          </UFormField>
-        </template>
-        <template #footer>
-          <div class="flex w-full justify-end gap-2">
-            <UButton color="neutral" variant="outline" label="Cancel" @click="saveOpen = false" />
-            <UButton icon="i-lucide-git-commit-horizontal" label="Commit & push" :loading="saving" :disabled="!saveMessage.trim()" @click="save" />
-          </div>
-        </template>
-      </UModal>
+      <RunPipelineModal v-model:open="runOpen" :pipeline="pipeline" />
     </template>
   </UDashboardPanel>
 </template>

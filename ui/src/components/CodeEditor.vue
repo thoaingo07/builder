@@ -17,6 +17,7 @@ const view = shallowRef<EditorView | null>(null)
 const isDark = useIsDark()
 const theme = new Compartment()
 const readOnly = new Compartment()
+const readOnlyExt = (r: boolean) => [EditorState.readOnly.of(r), EditorView.editable.of(!r)]
 
 const lightTheme = EditorView.theme({
   '&': { backgroundColor: 'var(--ui-bg)', color: 'var(--ui-text)' },
@@ -36,7 +37,7 @@ onMounted(() => {
         EditorState.tabSize.of(2),
         yaml(),
         theme.of(isDark.value ? oneDark : lightTheme),
-        readOnly.of(EditorState.readOnly.of(props.readonly)),
+        readOnly.of(readOnlyExt(props.readonly)),
         EditorView.updateListener.of(u => {
           if (u.docChanged) emit('update:modelValue', u.state.doc.toString())
         }),
@@ -55,7 +56,7 @@ watch(() => props.modelValue, v => {
 })
 
 watch(isDark, d => view.value?.dispatch({ effects: theme.reconfigure(d ? oneDark : lightTheme) }))
-watch(() => props.readonly, r => view.value?.dispatch({ effects: readOnly.reconfigure(EditorState.readOnly.of(r)) }))
+watch(() => props.readonly, r => view.value?.dispatch({ effects: readOnly.reconfigure(readOnlyExt(r)) }))
 
 function goToLine(line: number) {
   const ed = view.value

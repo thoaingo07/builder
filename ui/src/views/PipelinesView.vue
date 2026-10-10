@@ -87,7 +87,7 @@ async function unmap(p: PipelineDto) {
 
 function menu(p: PipelineDto): DropdownMenuItem[][] {
   const groups: DropdownMenuItem[][] = [[
-    { label: 'Edit runner file', icon: 'i-lucide-file-code-2', onSelect: () => void router.push(`/pipelines/${p.id}/editor`) },
+    { label: 'View runner file', icon: 'i-lucide-file-code-2', onSelect: () => void router.push(`/pipelines/${p.id}/editor`) },
     { label: 'Triggers', icon: 'i-lucide-zap', onSelect: () => openTriggers(p) },
     { label: 'Builds', icon: 'i-lucide-hammer', onSelect: () => void router.push({ path: '/builds', query: { pipelineId: p.id } }) },
     { label: 'Repository', icon: 'i-lucide-folder-git-2', onSelect: () => void router.push(`/repositories/${p.repositoryId}`) },
@@ -187,7 +187,7 @@ onBeforeUnmount(() => off?.())
           />
         </template>
         <template #footer>
-          <UButton v-if="triggersFor" :to="`/pipelines/${triggersFor.id}/editor`" icon="i-lucide-file-code-2" label="Edit in runner file" color="neutral" variant="outline" />
+          <UButton v-if="triggersFor" :to="`/pipelines/${triggersFor.id}/editor`" icon="i-lucide-file-code-2" label="View runner file" color="neutral" variant="outline" />
         </template>
       </USlideover>
     </template>
