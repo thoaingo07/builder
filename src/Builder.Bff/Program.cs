@@ -110,7 +110,9 @@ if (Directory.Exists(uiRoot))
 {
     var files = new PhysicalFileProvider(uiRoot);
     app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = files });
-    app.UseStaticFiles(new StaticFileOptions { FileProvider = files });
+    var types = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+    types.Mappings[".md"] = "text/markdown; charset=utf-8"; // /runner-guide.md (public, read by coding agents)
+    app.UseStaticFiles(new StaticFileOptions { FileProvider = files, ContentTypeProvider = types });
 }
 
 app.UseAuthentication();

@@ -35,6 +35,7 @@ const nav = computed<NavigationMenuItem[][]>(() => [
   [
     { label: 'Projects', icon: 'i-lucide-folder-kanban', to: '/projects' },
     { label: 'Settings', icon: 'i-lucide-settings', to: '/settings' },
+    { label: 'Runner guide', icon: 'i-lucide-book-open', to: '/guide' },
     ...(org.isAdmin ? [{ label: 'Cleanup', icon: 'i-lucide-brush-cleaning', to: '/cleanup' }] : []),
   ],
 ])

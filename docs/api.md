@@ -40,6 +40,7 @@ shared). Runner names are unique per project; environment and secret names per s
 | GET | `/bff/user` | `UserDto` · 401 when signed out |
 | GET | `/bff/providers` | `{ password: boolean, google: boolean }` |
 | GET | `/bff/login/google?returnUrl=/x` | browser navigation → Google → back to `returnUrl`, or `/login?error=not_allowed|google_failed` |
+| GET | `/runner-guide.md` | the runner guide (`docs/runner-guide.md`) as Markdown, **no sign-in** — for coding agents; `/guide` renders it |
 
 ## Types
 

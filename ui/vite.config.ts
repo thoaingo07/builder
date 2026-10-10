@@ -1,12 +1,31 @@
+import { readFileSync } from 'node:fs'
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import ui from '@nuxt/ui/vite'
 
 const bff = process.env.BUILDER_BFF_URL ?? 'http://localhost:19000'
 
+// docs/runner-guide.md is published as-is at /runner-guide.md (no sign-in), for coding agents to read
+const guidePath = fileURLToPath(new URL('../docs/runner-guide.md', import.meta.url))
+function runnerGuide(): Plugin {
+  return {
+    name: 'runner-guide',
+    configureServer(server) {
+      server.middlewares.use('/runner-guide.md', (_req, res) => {
+        res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
+        res.end(readFileSync(guidePath, 'utf8'))
+      })
+    },
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'runner-guide.md', source: readFileSync(guidePath, 'utf8') })
+    },
+  }
+}
+
 export default defineConfig({
   plugins: [
+    runnerGuide(),
     vue(),
     ui({
       ui: {
