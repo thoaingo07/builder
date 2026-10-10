@@ -29,7 +29,21 @@ export interface BuildSummaryDto {
   commit: string | null; entryTask: string; status: BuildStatus; requestedBy: string
   error: string | null; queuedAt: IsoDate; startedAt: IsoDate | null; finishedAt: IsoDate | null
   jobCounts: JobCounts
+  reason: BuildReason; pullRequestId: number | null
 }
+export type BuildReason = 'Manual' | 'Push' | 'PullRequest' | 'Schedule' | 'Rerun'
+
+// triggers (x-builder.triggers in the runner file)
+/** branches [] = all branches */
+export interface PushTrigger { branches: string[]; paths: string[]; vars: Record<string, string> }
+/** branches = target branches */
+export interface PullRequestTrigger { branches: string[]; paths: string[]; vars: Record<string, string> }
+export interface ScheduleTrigger { cron: string; branch: string; timeZone: string; vars: Record<string, string> }
+export interface TriggerSpec { push: PushTrigger | null; pullRequest: PullRequestTrigger | null; schedules: ScheduleTrigger[] }
+export interface ScheduleDto { cron: string; timeZone: string; branch: string; nextRunAt: IsoDate | null; lastRunAt: IsoDate | null }
+export interface PipelineTriggersDto { triggers: TriggerSpec; commit: string | null; error: string | null; schedules: ScheduleDto[] }
+/** secret is shown once */
+export interface HookSetupDto { url: string; header: string; secret: string | null; installed: number | null }
 
 /** A "runner": one mapped runner file (the API keeps the /pipelines path). */
 export interface PipelineDto {
@@ -85,6 +99,8 @@ export interface RunInputsDto { branch: string; entryTask: string; inputs: RunIn
 export interface ArtifactDto { id: Guid; jobId: Guid; name: string; sizeBytes: number; createdAt: IsoDate }
 
 export interface BuildDetailDto extends BuildSummaryDto {
+  /** e.g. refs/pull/7/merge for pull request builds */
+  sourceRef: string | null
   variables: Record<string, string>; jobs: JobDto[]; artifacts: ArtifactDto[]; deployments: DeploymentDto[]
 }
 

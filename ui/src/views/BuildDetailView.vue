@@ -11,6 +11,7 @@ import { useNotify } from '@/composables/useNotify'
 import { useNow } from '@/composables/useNow'
 import { useBuildActions } from '@/composables/useBuildActions'
 import StatusBadge from '@/components/StatusBadge.vue'
+import ReasonBadge from '@/components/ReasonBadge.vue'
 import JobProgress from '@/components/JobProgress.vue'
 import JobGraph from '@/components/graph/JobGraph.vue'
 import JobPanel from '@/components/JobPanel.vue'
@@ -140,6 +141,7 @@ watch(() => props.id, (next, prev) => {
         </template>
         <template #trailing>
           <StatusBadge v-if="build" :status="build.status" />
+          <ReasonBadge v-if="build" :reason="build.reason" :pull-request-id="build.pullRequestId" :by="build.requestedBy" />
         </template>
         <template #right>
           <template v-if="build">
@@ -177,6 +179,9 @@ watch(() => props.id, (next, prev) => {
             <div>
               <div class="text-xs text-muted">Branch</div>
               <div class="flex items-center gap-1 truncate text-sm font-medium"><UIcon name="i-lucide-git-branch" class="shrink-0" />{{ build.branch }}</div>
+              <UTooltip v-if="build.sourceRef" :text="`Built from ${build.sourceRef}`">
+                <div class="truncate font-mono text-[11px] text-muted">{{ build.sourceRef }}</div>
+              </UTooltip>
             </div>
             <div>
               <div class="text-xs text-muted">Commit</div>

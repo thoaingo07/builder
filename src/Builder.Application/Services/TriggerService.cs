@@ -182,7 +182,8 @@ public sealed class TriggerService(
     public static DateTimeOffset? Next(string cron, string timeZone, DateTimeOffset after)
     {
         var expression = CronExpression.Parse(cron, cron.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length == 6 ? CronFormat.IncludeSeconds : CronFormat.Standard);
-        return expression.GetNextOccurrence(after, TimeZoneInfo.FindSystemTimeZoneById(timeZone));
+        // in UTC: Cronos answers in the schedule's own offset, and timestamptz columns only take UTC
+        return expression.GetNextOccurrence(after, TimeZoneInfo.FindSystemTimeZoneById(timeZone))?.ToUniversalTime();
     }
 
     // ---------------------------------------------------------------- helpers

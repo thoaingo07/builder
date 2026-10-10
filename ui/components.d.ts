@@ -30,6 +30,7 @@ declare module 'vue' {
     KeyValueEditor: typeof import('./src/components/pipelines/KeyValueEditor.vue')['default']
     LogViewer: typeof import('./src/components/LogViewer.vue')['default']
     OrgSwitcher: typeof import('./src/components/org/OrgSwitcher.vue')['default']
+    ReasonBadge: typeof import('./src/components/ReasonBadge.vue')['default']
     RequiresEditor: typeof import('./src/components/pipelines/RequiresEditor.vue')['default']
     ResourceMeter: typeof import('./src/components/ResourceMeter.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
@@ -43,6 +44,8 @@ declare module 'vue' {
     TaskForm: typeof import('./src/components/pipelines/TaskForm.vue')['default']
     TaskGraphEditor: typeof import('./src/components/graph/TaskGraphEditor.vue')['default']
     TaskNode: typeof import('./src/components/graph/TaskNode.vue')['default']
+    TriggersForm: typeof import('./src/components/pipelines/TriggersForm.vue')['default']
+    TriggersPanel: typeof import('./src/components/pipelines/TriggersPanel.vue')['default']
     UAlert: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Alert.vue')['default']
     UApp: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/App.vue')['default']
     UAvatar: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Avatar.vue')['default']
@@ -80,5 +83,6 @@ declare module 'vue' {
     UTabs: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Tabs.vue')['default']
     UTextarea: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Textarea.vue')['default']
     UTooltip: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Tooltip.vue')['default']
+    WebhooksCard: typeof import('./src/components/repositories/WebhooksCard.vue')['default']
   }
 }

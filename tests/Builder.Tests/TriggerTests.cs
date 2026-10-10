@@ -77,6 +77,8 @@ public class TriggerTests
         Assert.Equal(new DateTimeOffset(2026, 10, 11, 2, 0, 0, TimeSpan.Zero), TriggerService.Next("0 2 * * *", "UTC", at));
         Assert.Equal(new DateTimeOffset(2026, 10, 11, 0, 0, 0, TimeSpan.Zero), TriggerService.Next("0 2 * * *", "Europe/Amsterdam", at)); // CEST = UTC+2
         Assert.Equal(at.AddSeconds(30), TriggerService.Next("*/30 * * * * *", "UTC", at));
+        // stored in timestamptz: always UTC, whatever the schedule's zone
+        Assert.Equal(TimeSpan.Zero, TriggerService.Next("0 3 * * 1-5", "Asia/Ho_Chi_Minh", at)!.Value.Offset);
     }
 
     [Theory]

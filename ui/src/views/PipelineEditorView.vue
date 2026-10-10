@@ -13,6 +13,7 @@ import { useConfirm } from '@/composables/useConfirm'
 import CodeEditor from '@/components/CodeEditor.vue'
 import TaskGraphEditor from '@/components/graph/TaskGraphEditor.vue'
 import TaskForm from '@/components/pipelines/TaskForm.vue'
+import TriggersForm from '@/components/pipelines/TriggersForm.vue'
 
 const props = defineProps<{ id: string }>()
 
@@ -45,7 +46,7 @@ const graph = ref<InstanceType<typeof TaskGraphEditor> | null>(null)
 const doc = shallowRef<Document>(tf.parse(''))
 watch(content, c => { doc.value = tf.parse(c) }, { immediate: true })
 const parseErrors = computed(() => tf.errorsOf(doc.value))
-const lastGood = shallowRef<tf.TaskfileModel>({ version: '3', entry: '', tasks: [] })
+const lastGood = shallowRef<tf.TaskfileModel>({ version: '3', entry: '', triggers: { push: null, pullRequest: null, schedules: [], error: null }, tasks: [] })
 const model = computed<tf.TaskfileModel>(() => {
   if (parseErrors.value.length) return lastGood.value
   const m = tf.read(doc.value)
@@ -309,10 +310,16 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
               :is-entry="model.entry === selectedTask.name"
               @mutate="mutate" @rename="rename" @remove="removeTask" @set-entry="makeEntry"
             />
-            <UEmpty
-              v-else icon="i-lucide-mouse-pointer-click" title="Select a task" variant="naked"
-              description="Click a task in the graph to edit its commands, dependencies, approval and deployment."
-            />
+            <div v-else class="space-y-4">
+              <div>
+                <h3 class="flex items-center gap-2 font-semibold text-highlighted"><UIcon name="i-lucide-zap" class="text-muted" />Triggers</h3>
+                <p class="mt-1 text-xs text-muted">
+                  <code>x-builder.triggers</code> — read from {{ pipeline?.defaultBranch }} after you commit.
+                  Click a task in the graph to edit its steps, dependencies, approval and deployment.
+                </p>
+              </div>
+              <TriggersForm :triggers="model.triggers" :default-branch="pipeline?.defaultBranch ?? 'main'" @mutate="mutate" />
+            </div>
           </aside>
         </div>
 

@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { DropdownMenuItem, TableColumn } from '@nuxt/ui'
 import { api } from '@/api/client'
-import type { PipelineDto } from '@/api/types'
+import type { PipelineDto, PipelineTriggersDto } from '@/api/types'
 import { relativeTime } from '@/lib/format'
 import { upsert } from '@/lib/collections'
 import { useLiveStore } from '@/stores/live'
@@ -12,8 +12,10 @@ import { useNotify } from '@/composables/useNotify'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNow } from '@/composables/useNow'
 import StatusBadge from '@/components/StatusBadge.vue'
+import ReasonBadge from '@/components/ReasonBadge.vue'
 import RunnerEditModal from '@/components/pipelines/RunnerEditModal.vue'
 import RunPipelineModal from '@/components/pipelines/RunPipelineModal.vue'
+import TriggersPanel from '@/components/pipelines/TriggersPanel.vue'
 
 // "Runners": each one is a mapped runner file (.builder/runners/*.yml) in a repository.
 const router = useRouter()
@@ -29,16 +31,42 @@ const editOpen = ref(false)
 const runOpen = ref(false)
 const editing = ref<PipelineDto | null>(null)
 const running = ref<PipelineDto | null>(null)
+/** triggers per runner, loaded after the list for the summary column */
+const triggers = ref<Record<string, PipelineTriggersDto | 'error'>>({})
+const triggersFor = ref<PipelineDto | null>(null)
+const triggersOpen = ref(false)
+
+async function loadTriggers() {
+  const results = await Promise.allSettled(runners.value.map(r => api.pipelines.triggers(r.id)))
+  const next: typeof triggers.value = {}
+  results.forEach((res, i) => { next[runners.value[i].id] = res.status === 'fulfilled' ? res.value : 'error' })
+  triggers.value = next
+}
+function initialTriggers(id: string): PipelineTriggersDto | null {
+  const t = triggers.value[id]
+  return t && t !== 'error' ? t : null
+}
+function openTriggers(p: PipelineDto) { triggersFor.value = p; triggersOpen.value = true }
+function summary(id: string) {
+  const t = triggers.value[id]
+  if (!t) return null
+  if (t === 'error') return { error: 'Could not read triggers', push: false, pr: false, schedules: 0 }
+  return { error: t.error, push: !!t.triggers.push, pr: !!t.triggers.pullRequest, schedules: t.triggers.schedules.length }
+}
 
 const columns: TableColumn<PipelineDto>[] = [
   { accessorKey: 'name', header: 'Runner' },
   { id: 'repo', header: 'Repository' },
+  { id: 'triggers', header: 'Triggers' },
   { id: 'last', header: 'Last build' },
   { id: 'actions', header: '' },
 ]
 
 async function load() {
-  try { runners.value = await api.pipelines.list() } catch (e) { notify.error(e, 'Could not load runners') } finally { loading.value = false }
+  try {
+    runners.value = await api.pipelines.list()
+    void loadTriggers()
+  } catch (e) { notify.error(e, 'Could not load runners') } finally { loading.value = false }
 }
 
 function edit(p: PipelineDto) { editing.value = p; editOpen.value = true }
@@ -60,6 +88,7 @@ async function unmap(p: PipelineDto) {
 function menu(p: PipelineDto): DropdownMenuItem[][] {
   const groups: DropdownMenuItem[][] = [[
     { label: 'Edit runner file', icon: 'i-lucide-file-code-2', onSelect: () => void router.push(`/pipelines/${p.id}/editor`) },
+    { label: 'Triggers', icon: 'i-lucide-zap', onSelect: () => openTriggers(p) },
     { label: 'Builds', icon: 'i-lucide-hammer', onSelect: () => void router.push({ path: '/builds', query: { pipelineId: p.id } }) },
     { label: 'Repository', icon: 'i-lucide-folder-git-2', onSelect: () => void router.push(`/repositories/${p.repositoryId}`) },
   ]]
@@ -109,9 +138,29 @@ onBeforeUnmount(() => off?.())
               {{ row.original.taskfilePath }} · <UIcon name="i-lucide-git-branch" />{{ row.original.defaultBranch }}
             </div>
           </template>
+          <template #triggers-cell="{ row }">
+            <button type="button" class="flex items-center gap-1.5" :aria-label="`Triggers of ${row.original.name}`" @click="openTriggers(row.original)">
+              <template v-if="summary(row.original.id)">
+                <UTooltip v-if="summary(row.original.id)!.error" :text="summary(row.original.id)!.error!">
+                  <UBadge icon="i-lucide-circle-alert" label="Invalid" color="error" variant="subtle" size="sm" />
+                </UTooltip>
+                <template v-else>
+                  <UTooltip text="Push"><UIcon name="i-lucide-git-commit-horizontal" :class="summary(row.original.id)!.push ? 'text-success' : 'text-dimmed'" /></UTooltip>
+                  <UTooltip text="Pull request"><UIcon name="i-lucide-git-pull-request" :class="summary(row.original.id)!.pr ? 'text-success' : 'text-dimmed'" /></UTooltip>
+                  <UTooltip :text="`${summary(row.original.id)!.schedules} schedule(s)`">
+                    <span class="flex items-center gap-0.5" :class="summary(row.original.id)!.schedules ? 'text-success' : 'text-dimmed'">
+                      <UIcon name="i-lucide-clock" /><span v-if="summary(row.original.id)!.schedules" class="text-xs">{{ summary(row.original.id)!.schedules }}</span>
+                    </span>
+                  </UTooltip>
+                </template>
+              </template>
+              <USkeleton v-else class="h-4 w-14" />
+            </button>
+          </template>
           <template #last-cell="{ row }">
             <RouterLink v-if="row.original.lastBuild" :to="`/builds/${row.original.lastBuild.id}`" class="flex items-center gap-2">
               <StatusBadge :status="row.original.lastBuild.status" size="sm" />
+              <ReasonBadge :reason="row.original.lastBuild.reason" :pull-request-id="row.original.lastBuild.pullRequestId" :by="row.original.lastBuild.requestedBy" size="xs" />
               <span class="text-xs text-muted">#{{ row.original.lastBuild.number }} · {{ relativeTime(row.original.lastBuild.queuedAt, now) }}</span>
             </RouterLink>
             <span v-else class="text-xs text-dimmed">Never run</span>
@@ -129,6 +178,18 @@ onBeforeUnmount(() => off?.())
 
       <RunnerEditModal v-model:open="editOpen" :runner="editing" @saved="p => (runners = upsert(runners, p, false))" />
       <RunPipelineModal v-model:open="runOpen" :pipeline="running" />
+      <USlideover v-model:open="triggersOpen" :title="`Triggers · ${triggersFor?.name ?? ''}`" :description="triggersFor ? `${triggersFor.repositoryName} · ${triggersFor.taskfilePath}` : undefined" :ui="{ content: 'max-w-lg' }">
+        <template #body>
+          <TriggersPanel
+            v-if="triggersFor" :pipeline-id="triggersFor.id" :default-branch="triggersFor.defaultBranch"
+            :initial="initialTriggers(triggersFor.id)"
+            @loaded="t => (triggers = { ...triggers, [triggersFor!.id]: t })"
+          />
+        </template>
+        <template #footer>
+          <UButton v-if="triggersFor" :to="`/pipelines/${triggersFor.id}/editor`" icon="i-lucide-file-code-2" label="Edit in runner file" color="neutral" variant="outline" />
+        </template>
+      </USlideover>
     </template>
   </UDashboardPanel>
 </template>

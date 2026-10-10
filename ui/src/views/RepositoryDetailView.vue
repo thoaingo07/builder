@@ -2,10 +2,11 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
 import { api, ApiError } from '@/api/client'
-import type { RepositoryDto, RunnerFileDto, RunnerFilesDto } from '@/api/types'
+import type { ConnectionType, RepositoryDto, RunnerFileDto, RunnerFilesDto } from '@/api/types'
 import { shortSha } from '@/lib/format'
 import { useOrgStore } from '@/stores/org'
 import { useNotify } from '@/composables/useNotify'
+import WebhooksCard from '@/components/repositories/WebhooksCard.vue'
 
 const props = defineProps<{ id: string }>()
 const org = useOrgStore()
@@ -19,6 +20,7 @@ const files = ref<RunnerFilesDto | null>(null)
 const filesError = ref<string | null>(null)
 const loadingFiles = ref(false)
 const mapping = ref(false)
+const connectionType = ref<ConnectionType | null>(null)
 
 /** per-file mapping choices, keyed by path */
 const picks = reactive<Record<string, { selected: boolean; name: string; entryTask: string }>>({})
@@ -87,6 +89,11 @@ onMounted(async () => {
     if (e instanceof ApiError && e.status === 404) notFound.value = true
     else notify.error(e, 'Could not load repository')
     return
+  }
+  if (repo.value.connectionId) {
+    void api.connections.list()
+      .then(list => { connectionType.value = list.find(c => c.id === repo.value?.connectionId)?.type ?? null })
+      .catch(() => undefined)
   }
   try {
     branches.value = await api.repositories.branches(props.id)
@@ -211,6 +218,8 @@ tasks:
           </UTable>
         </UCard>
         <p v-if="files?.files.length && !org.isAdmin" class="text-xs text-muted">Only admins can map runner files to runners.</p>
+
+        <WebhooksCard v-if="org.isAdmin && repo" :repo="repo" :connection-type="connectionType" />
       </template>
     </template>
   </UDashboardPanel>

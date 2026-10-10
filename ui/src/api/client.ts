@@ -2,7 +2,7 @@ import type {
   AgentDto, AgentMetricsDto, BuildDetailDto, BuildStatus, BuildSummaryDto, CleanupInput, CleanupResultDto,
   ConnectionDto, ConnectionInput, ConnectionTestDto, DashboardDto, DeploymentDto, EnvironmentDto, EnvironmentInput,
   Guid, JobDto, LogLineDto, MapRunnersInput, MeDto, MemberDto, OrgCreatedDto, OrgDto, OrgRole, PipelineDto,
-  PipelineInput, PlanPreviewDto, RunInputsDto, ProblemDetails, RemoteRepositoryDto, RepositoryDto, RepositoryInput,
+  PipelineInput, PipelineTriggersDto, PlanPreviewDto, RunInputsDto, HookSetupDto, ProblemDetails, RemoteRepositoryDto, RepositoryDto, RepositoryInput,
   RunnerFilesDto, SecretDto, SecretInput, TaskfileDto, UserDto,
 } from './types'
 
@@ -107,6 +107,8 @@ export const api = {
       put<TaskfileDto>(`/api/pipelines/${id}/taskfile`, { branch, content, message }),
     plan: (content: string, entryTask?: string | null) =>
       post<PlanPreviewDto>('/api/pipelines/plan', { content, entryTask: entryTask || null }),
+    triggers: (id: Guid) => get<PipelineTriggersDto>(`/api/pipelines/${id}/triggers`),
+    refreshTriggers: (id: Guid) => post<PipelineTriggersDto>(`/api/pipelines/${id}/triggers/refresh`),
     inputs: (id: Guid, branch?: string | null, entryTask?: string | null) =>
       get<RunInputsDto>(`/api/pipelines/${id}/inputs`, { branch, entryTask }),
     run: (id: Guid, input: { branch?: string | null; entryTask?: string | null; variables?: Record<string, string> }) =>
@@ -121,6 +123,10 @@ export const api = {
     remove: (id: Guid) => del(`/api/repositories/${id}`),
     branches: (id: Guid) => get<string[]>(`/api/repositories/${id}/branches`),
     runnerFiles: (id: Guid, branch?: string | null) => get<RunnerFilesDto>(`/api/repositories/${id}/runner-files`, { branch }),
+    /** new webhook secret for manual setup (the old one stops working) */
+    hook: (id: Guid, origin: string) => request<HookSetupDto>('POST', `/api/repositories/${id}/hook`, {}, { origin }),
+    /** rotates the secret and creates the Azure DevOps service hooks */
+    installHook: (id: Guid, origin: string) => request<HookSetupDto>('POST', `/api/repositories/${id}/hook/install`, {}, { origin }),
     mapRunners: (id: Guid, input: MapRunnersInput) => post<PipelineDto[]>(`/api/repositories/${id}/runners`, input),
   },
 

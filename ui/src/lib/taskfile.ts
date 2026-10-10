@@ -57,9 +57,21 @@ export interface TaskModel {
   deploy: DeployModel | null
 }
 
+/** push / pull-request trigger; branches [] = all branches (PR: target branches) */
+export interface FilterTriggerModel { branches: string[]; paths: string[]; vars: KeyValue[] }
+export interface ScheduleModel { cron: string; branch: string; timeZone: string; vars: KeyValue[] }
+export interface TriggersModel {
+  push: FilterTriggerModel | null
+  pullRequest: FilterTriggerModel | null
+  schedules: ScheduleModel[]
+  /** the file uses forms the editor can't represent (kept as written) */
+  error: string | null
+}
+
 export interface TaskfileModel {
   version: string
   entry: string
+  triggers: TriggersModel
   tasks: TaskModel[]
 }
 
@@ -226,11 +238,51 @@ function readKeyValues(n: unknown): KeyValue[] {
   })
 }
 
+const TRUE = new Set(['true', 'on', 'yes'])
+const FALSE = new Set(['false', 'off', 'no'])
+
+/** `true` → all branches; "main" / [main, release/*] → branches; { branches, paths, vars } → full; false/absent → off */
+function readFilter(n: unknown): FilterTriggerModel | null {
+  if (n === undefined || n === null) return null
+  if (isScalar(n)) {
+    const v = String(n.value ?? '').toLowerCase()
+    if (n.value === false || FALSE.has(v)) return null
+    if (n.value === true || TRUE.has(v)) return { branches: [], paths: [], vars: [] }
+    return { branches: [str(n.value)], paths: [], vars: [] }
+  }
+  if (isSeq(n)) return { branches: stringList(n), paths: [], vars: [] }
+  if (isMap(n)) return { branches: stringList(n.get('branches', true)), paths: stringList(n.get('paths', true)), vars: readKeyValues(n.get('vars', true)) }
+  return null
+}
+
+function triggersNode(doc: Document): YAMLMap | null {
+  const t = doc.getIn(['x-builder', 'triggers'], true)
+  return isMap(t) ? t : null
+}
+
+function readTriggers(doc: Document): TriggersModel {
+  const model: TriggersModel = { push: null, pullRequest: null, schedules: [], error: null }
+  const raw = doc.getIn(['x-builder', 'triggers'], true)
+  if (raw === undefined || raw === null) return model
+  const t = triggersNode(doc)
+  if (!t) return { ...model, error: 'x-builder.triggers must be a mapping (push, pull-request, schedule).' }
+  model.push = readFilter(t.get('push', true))
+  model.pullRequest = readFilter(t.has('pull-request') ? t.get('pull-request', true) : t.get('pr', true))
+  const sched = t.get('schedule', true)
+  const items = isSeq(sched) ? sched.items : isMap(sched) ? [sched] : []
+  model.schedules = items.filter(isMap).map(m => ({
+    cron: str(m.get('cron')), branch: str(m.get('branch')),
+    timeZone: str(m.get('timezone')) || 'UTC', vars: readKeyValues(m.get('vars', true)),
+  }))
+  return model
+}
+
 export function read(doc: Document): TaskfileModel {
   const tasks = tasksMap(doc)
   return {
     version: str(doc.get('version')),
     entry: str(doc.getIn(['x-builder', 'entry'])),
+    triggers: readTriggers(doc),
     tasks: tasks ? tasks.items.map(p => readTask(keyOf(p as Pair), (p as Pair).value)) : [],
   }
 }
@@ -461,6 +513,81 @@ export function setDeploy(doc: Document, task: string, deploy: DeployModel | nul
     if (v) m.setIn(['x-deploy', k], v)
     else m.deleteIn(['x-deploy', k])
   }
+}
+
+function ensureTriggers(doc: Document): YAMLMap {
+  if (!isMap(doc.get('x-builder', true))) doc.set('x-builder', new YAMLMap())
+  let t = triggersNode(doc)
+  if (!t) { t = new YAMLMap(); doc.setIn(['x-builder', 'triggers'], t) }
+  return t
+}
+
+function pruneTriggers(doc: Document) {
+  const t = triggersNode(doc)
+  if (t && t.items.length === 0) doc.deleteIn(['x-builder', 'triggers'])
+  const xb = doc.get('x-builder', true)
+  if (isMap(xb) && xb.items.length === 0) doc.delete('x-builder')
+}
+
+/** Writes vars into a map node, keeping unchanged/dynamic value nodes. */
+function writeVars(doc: Document, owner: YAMLMap, vars: KeyValue[]) {
+  const clean = vars.filter(v => v.key.trim())
+  if (!clean.length) { owner.delete('vars'); return }
+  const old = owner.get('vars', true)
+  const map = new YAMLMap()
+  for (const e of clean) {
+    const prev = isMap(old) ? old.get(e.key, true) : undefined
+    const keep = prev !== undefined && (e.dynamic || (isScalar(prev) && scalarText(prev) === e.value))
+    map.set(e.key.trim(), keep ? prev : doc.createNode(e.value))
+  }
+  map.flow = clean.length <= 3
+  owner.set('vars', map)
+}
+
+/**
+ * Writes push / pull-request. Uses the shortest form (`true`, a branch list) unless paths or vars are set,
+ * and edits an existing mapping in place so comments and unknown keys survive. null = off (key removed).
+ */
+export function setFilterTrigger(doc: Document, which: 'push' | 'pull-request', value: FilterTriggerModel | null) {
+  const t = ensureTriggers(doc)
+  const key = which === 'pull-request' && !t.has('pull-request') && t.has('pr') ? 'pr' : which
+  if (!value) { t.delete(key); pruneTriggers(doc); return }
+  const branches = value.branches.map(b => b.trim()).filter(Boolean)
+  const paths = value.paths.map(p => p.trim()).filter(Boolean)
+  const existing = t.get(key, true)
+  if (isMap(existing) || paths.length || value.vars.some(v => v.key.trim())) {
+    const m = isMap(existing) ? existing : new YAMLMap()
+    if (branches.length) m.set('branches', flowList(doc, branches)); else m.delete('branches')
+    if (paths.length) m.set('paths', flowList(doc, paths)); else m.delete('paths')
+    writeVars(doc, m, value.vars)
+    if (m.items.length === 0) { t.set(key, true); return }
+    if (!isMap(existing)) t.set(key, m)
+    return
+  }
+  if (branches.length && isSeq(existing)) {
+    existing.items = branches.map(b => doc.createNode(b)) as never   // same node: its comment stays
+    return
+  }
+  t.set(key, branches.length ? flowList(doc, branches) : true)
+}
+
+/** Writes the schedule list, editing existing entries in place (unknown keys and comments are kept). */
+export function setSchedules(doc: Document, schedules: ScheduleModel[]) {
+  const t = ensureTriggers(doc)
+  if (!schedules.length) { t.delete('schedule'); pruneTriggers(doc); return }
+  const old = t.get('schedule', true)
+  const oldItems = isSeq(old) ? old.items : isMap(old) ? [old] : []
+  const seq = new YAMLSeq()
+  schedules.forEach((s, i) => {
+    const prev = oldItems[i]
+    const m = isMap(prev) ? prev : new YAMLMap()
+    m.set('cron', s.cron.trim())
+    if (s.branch.trim()) m.set('branch', s.branch.trim()); else m.delete('branch')
+    if (s.timeZone && s.timeZone !== 'UTC') m.set('timezone', s.timeZone); else m.delete('timezone')
+    writeVars(doc, m, s.vars)
+    seq.add(m)
+  })
+  t.set('schedule', seq)
 }
 
 export function setEntry(doc: Document, entry: string) {

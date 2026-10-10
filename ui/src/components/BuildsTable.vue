@@ -7,6 +7,7 @@ import { useNow } from '@/composables/useNow'
 import { useBuildActions } from '@/composables/useBuildActions'
 import StatusBadge from './StatusBadge.vue'
 import JobProgress from './JobProgress.vue'
+import ReasonBadge from './ReasonBadge.vue'
 
 withDefaults(defineProps<{ builds: BuildSummaryDto[]; loading?: boolean; compact?: boolean; empty?: string }>(), {
   loading: false, compact: false, empty: 'No builds yet',
@@ -42,7 +43,10 @@ function open(_e: Event, row: { original: BuildSummaryDto }) {
       <StatusBadge :status="row.original.status" size="sm" />
     </template>
     <template #build-cell="{ row }">
-      <div class="font-medium text-highlighted">{{ row.original.pipelineName }} <span class="text-muted">#{{ row.original.number }}</span></div>
+      <div class="flex items-center gap-2">
+        <span class="font-medium text-highlighted">{{ row.original.pipelineName }} <span class="text-muted">#{{ row.original.number }}</span></span>
+        <ReasonBadge :reason="row.original.reason" :pull-request-id="row.original.pullRequestId" :by="row.original.requestedBy" size="xs" />
+      </div>
       <div v-if="row.original.error" class="max-w-64 truncate text-xs text-error">{{ row.original.error }}</div>
     </template>
     <template #source-cell="{ row }">
