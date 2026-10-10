@@ -9,6 +9,8 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { public: true } },
+    // the runner guide is public: coding agents and colleagues read it without an account
+    { path: '/guide', name: 'guide', component: () => import('@/views/GuideView.vue'), meta: { public: true } },
     { path: '/welcome', name: 'onboarding', component: () => import('@/views/OnboardingView.vue') },
     {
       path: '/',

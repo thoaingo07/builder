@@ -4,6 +4,8 @@ WORKDIR /ui
 COPY ui/package.json ui/package-lock.json ./
 RUN npm ci
 COPY ui/ ./
+# the runner guide is published with the UI (/runner-guide.md, /guide)
+COPY docs/runner-guide.md /docs/runner-guide.md
 RUN npm run build
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
