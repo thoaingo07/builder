@@ -48,8 +48,9 @@ public sealed class Workspace
             var fetched = await Git(log, ct, auth, "fetch", "--quiet", "--depth", "1", source.Url, source.Commit) == 0;
             if (!fetched)
             {
-                log.System("Shallow fetch by commit is not supported by this server; fetching the branch");
-                if (await Git(log, ct, auth, "fetch", "--quiet", source.Url, $"+refs/heads/{source.Branch}:refs/remotes/origin/{source.Branch}") != 0)
+                var refName = source.Ref ?? $"refs/heads/{source.Branch}";
+                log.System($"Fetch by commit is not supported by this server; fetching {refName}");
+                if (await Git(log, ct, auth, "fetch", "--quiet", source.Url, $"+{refName}:refs/remotes/builder/source") != 0)
                     throw new InvalidOperationException("git fetch failed");
             }
             if (await Git(log, ct, null, "checkout", "--quiet", "--force", source.Commit) != 0)

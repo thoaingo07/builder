@@ -60,7 +60,7 @@ public enum LogStream { Out, Err, System }
 public sealed record LogChunk(DateTimeOffset Timestamp, LogStream Stream, string Text, int? Step = null);
 
 /// <summary>What to fetch. Credentials are not part of the assignment: the agent asks for them when the job starts.</summary>
-public sealed record GitSource(string Url, string Branch, string Commit);
+public sealed record GitSource(string Url, string Branch, string Commit, string? Ref = null);
 
 public sealed record RegistryLogin(string Server, string Username, string Password);
 

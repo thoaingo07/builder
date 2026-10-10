@@ -11,7 +11,7 @@ namespace Builder.Infrastructure.Git;
 /// <c>refs</c>, files and folders from <c>items</c>, Taskfile edits are committed with <c>pushes</c>.
 /// Build agents still fetch with git.
 /// </summary>
-public sealed class AzureDevOpsGit(HttpClient http) : IGitService
+public sealed class AzureDevOpsGit(HttpClient http) : IGitService, IGitHostStatus
 {
     private const string Api = "api-version=7.1";
 
@@ -84,6 +84,16 @@ public sealed class AzureDevOpsGit(HttpClient http) : IGitService
             .ToList();
     }
 
+    public async Task<IReadOnlyList<string>?> ChangedFilesAsync(GitRemote remote, string branch, string baseCommit, string headCommit, CancellationToken ct)
+    {
+        if (baseCommit.Trim('0').Length == 0) return null; // new branch: everything is "changed"
+        var c = Coords(remote);
+        var diff = await GetOrNullAsync<CommitDiff>(remote,
+            $"{c.RepoApi}/diffs/commits?baseVersion={baseCommit}&baseVersionType=commit&targetVersion={headCommit}&targetVersionType=commit&$top=2000&{Api}", ct);
+        return diff?.Changes?.Where(ch => ch.Item?.IsFolder != true && ch.Item?.Path is not null)
+            .Select(ch => ch.Item!.Path.TrimStart('/')).ToList();
+    }
+
     public async Task<string> CommitFileAsync(GitRemote remote, string branch, string path, string content, string message,
         string authorName, string authorEmail, CancellationToken ct)
     {
@@ -119,6 +129,26 @@ public sealed class AzureDevOpsGit(HttpClient http) : IGitService
         await EnsureOkAsync(res, ct);
         var result = await res.Content.ReadFromJsonAsync<PushResult>(ct);
         return result?.Commits?.FirstOrDefault()?.CommitId ?? throw new ExternalServiceException("Azure DevOps did not return the new commit.");
+    }
+
+    /// <summary>Commit status for push/manual builds, pull request status for PR builds (genre "builder", name = runner).</summary>
+    public async Task ReportAsync(GitRemote remote, BuildStatusReport report, CancellationToken ct)
+    {
+        if (Parse(remote.Url) is not { } c) return;
+        var url = report.PullRequestId is { } pr
+            ? $"{c.RepoApi}/pullRequests/{pr}/statuses?{Api}"
+            : $"{c.RepoApi}/commits/{report.Commit}/statuses?{Api}";
+        var body = new
+        {
+            state = report.State,
+            description = report.Description,
+            targetUrl = report.TargetUrl,
+            context = new { name = report.Name, genre = "builder" },
+        };
+        using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = JsonContent.Create(body) };
+        Authorize(req, remote);
+        using var res = await http.SendAsync(req, ct);
+        await EnsureOkAsync(res, ct);
     }
 
     private static Coordinates Coords(GitRemote remote) =>
@@ -162,6 +192,8 @@ public sealed class AzureDevOpsGit(HttpClient http) : IGitService
     private sealed record ListOf<T>(List<T> Value);
     private sealed record GitRef(string Name, string ObjectId);
     private sealed record GitItem(string Path, bool? IsFolder, string? Content);
+    private sealed record CommitDiff(List<Change>? Changes);
+    private sealed record Change(GitItem? Item);
     private sealed record PushResult(List<PushCommit>? Commits);
     private sealed record PushCommit(string CommitId);
 }
@@ -177,6 +209,8 @@ public sealed class GitRouter(AzureDevOpsGit azureDevOps, GitCli cli) : IGitServ
     public Task<IReadOnlyList<string>> ListFilesAsync(GitRemote remote, string branch, string commit, string folder, CancellationToken ct) =>
         For(remote).ListFilesAsync(remote, branch, commit, folder, ct);
     public Task<IReadOnlyList<string>> ListBranchesAsync(GitRemote remote, CancellationToken ct) => For(remote).ListBranchesAsync(remote, ct);
+    public Task<IReadOnlyList<string>?> ChangedFilesAsync(GitRemote remote, string branch, string baseCommit, string headCommit, CancellationToken ct) =>
+        For(remote).ChangedFilesAsync(remote, branch, baseCommit, headCommit, ct);
     public Task<string> CommitFileAsync(GitRemote remote, string branch, string path, string content, string message,
         string authorName, string authorEmail, CancellationToken ct) =>
         For(remote).CommitFileAsync(remote, branch, path, content, message, authorName, authorEmail, ct);

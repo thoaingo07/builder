@@ -12,6 +12,8 @@ public static class DependencyInjection
         .AddScoped<RepositoryService>()
         .AddScoped<SecretService>()
         .AddScoped<CredentialService>()
+        .AddScoped<TriggerService>()
+        .AddSingleton<ReportedStatuses>()
         .AddScoped<GitRemotes>()
         .AddScoped<BuildEvents>()
         .AddScoped<BuildService>()

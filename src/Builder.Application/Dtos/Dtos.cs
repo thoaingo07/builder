@@ -12,7 +12,8 @@ public sealed record JobCounts(int Total, int Pending, int Running, int WaitingA
 public sealed record BuildSummaryDto(
     Guid Id, Guid PipelineId, string PipelineName, int Number, string Branch, string? Commit, string EntryTask,
     BuildStatus Status, string RequestedBy, string? Error,
-    DateTimeOffset QueuedAt, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, JobCounts JobCounts);
+    DateTimeOffset QueuedAt, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, JobCounts JobCounts,
+    BuildReason Reason = BuildReason.Manual, int? PullRequestId = null);
 
 public sealed record ApprovalDto(string Message, List<string> Approvers, string? DecidedBy, DateTimeOffset? DecidedAt, string? Comment);
 
@@ -28,7 +29,8 @@ public sealed record BuildDetailDto(
     Guid Id, Guid PipelineId, string PipelineName, int Number, string Branch, string? Commit, string EntryTask,
     BuildStatus Status, string RequestedBy, string? Error,
     DateTimeOffset QueuedAt, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, JobCounts JobCounts,
-    Dictionary<string, string> Variables, List<JobDto> Jobs, List<ArtifactDto> Artifacts, List<DeploymentDto> Deployments);
+    Dictionary<string, string> Variables, List<JobDto> Jobs, List<ArtifactDto> Artifacts, List<DeploymentDto> Deployments,
+    BuildReason Reason, int? PullRequestId, string? SourceRef);
 
 public sealed record LogLineDto(long Id, Guid JobId, DateTimeOffset Timestamp, LogStreamKind Stream, string Text, int? Step);
 
@@ -112,6 +114,11 @@ public sealed record MemberDto(Guid UserId, string UserName, string DisplayName,
 public sealed record AddMemberInput(string Email, OrgRole Role);
 public sealed record ChangeRoleInput(OrgRole Role);
 public sealed record MeDto(UserDto User, List<OrgDto> Orgs);
+
+/// <summary>Where and how Azure DevOps posts webhooks. Secret is shown once (null after automatic installation).</summary>
+public sealed record HookSetupDto(string Url, string Header, string? Secret, int? Installed);
+public sealed record ScheduleDto(string Cron, string TimeZone, string Branch, DateTimeOffset? NextRunAt, DateTimeOffset? LastRunAt);
+public sealed record PipelineTriggersDto(Domain.Triggers.TriggerSpec Triggers, string? Commit, string? Error, List<ScheduleDto> Schedules);
 
 public sealed record SecretDto(Guid Id, string Name, string? Description, DateTimeOffset UpdatedAt, string UpdatedBy);
 public sealed record SecretInput(string Name, string? Value, string? Description);

@@ -121,6 +121,34 @@ internal static class E2E
         return bare;
     }
 
+    /// <summary>Commits files on a branch of a repository made by <see cref="CreateRepository"/> and pushes; returns (before, after).</summary>
+    public static (string Before, string After) Push(string root, string branch, IReadOnlyDictionary<string, string> files, string? pushRef = null)
+    {
+        var work = Path.Combine(root, "work");
+        var bare = Path.Combine(root, "repo.git");
+        var before = GitOut(bare, "rev-parse", "--verify", "--quiet", $"refs/heads/{branch}") ?? new string('0', 40);
+        Git(work, "checkout", "--quiet", "-B", branch, before.Trim('0').Length == 0 ? "main" : before);
+        foreach (var (path, content) in files)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(work, path))!);
+            File.WriteAllText(Path.Combine(work, path), content);
+        }
+        Git(work, "add", "-A");
+        Git(work, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "change " + string.Join(",", files.Keys));
+        Git(work, "push", "--quiet", "--force", bare, $"HEAD:{pushRef ?? $"refs/heads/{branch}"}");
+        return (before, GitOut(work, "rev-parse", "HEAD")!);
+    }
+
+    public static string? GitOut(string cwd, params string[] args)
+    {
+        var psi = new ProcessStartInfo("git") { WorkingDirectory = cwd, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        using var p = Process.Start(psi)!;
+        var output = p.StandardOutput.ReadToEnd().Trim();
+        p.WaitForExit();
+        return p.ExitCode == 0 ? output : null;
+    }
+
     private static void Git(string cwd, params string[] args)
     {
         var psi = new ProcessStartInfo("git") { WorkingDirectory = cwd, RedirectStandardError = true };

@@ -169,6 +169,55 @@ public sealed class AzureDevOpsClient(HttpClient http) : IAzureDevOpsClient
             .OrderBy(r => r.Project).ThenBy(r => r.Name).ToList();
     }
 
+    public async Task<int> InstallWebhooksAsync(string organizationUrl, string authorization, string project, string repository,
+        string hookUrl, string headerName, string headerValue, CancellationToken ct)
+    {
+        var repo = await GetAsync<RepoRef>(organizationUrl,
+            $"{Uri.EscapeDataString(project)}/_apis/git/repositories/{Uri.EscapeDataString(repository)}?api-version=7.1", authorization, ct);
+
+        // drop Builder's earlier subscriptions to this URL (re-install = rotate the secret)
+        var existing = await GetAsync<ListOf<Subscription>>(organizationUrl, "_apis/hooks/subscriptions?api-version=7.1", authorization, ct);
+        foreach (var old in existing.Value.Where(s => s.ConsumerInputs?.GetValueOrDefault("url") == hookUrl))
+        {
+            using var del = new HttpRequestMessage(HttpMethod.Delete, $"{organizationUrl.TrimEnd('/')}/_apis/hooks/subscriptions/{old.Id}?api-version=7.1");
+            del.Headers.TryAddWithoutValidation("Authorization", authorization);
+            using var _ = await http.SendAsync(del, ct);
+        }
+
+        var created = 0;
+        foreach (var eventType in new[] { "git.push", "git.pullrequest.created", "git.pullrequest.updated" })
+        {
+            var body = new
+            {
+                publisherId = "tfs",
+                eventType,
+                resourceVersion = "1.0",
+                consumerId = "webHooks",
+                consumerActionId = "httpRequest",
+                publisherInputs = new Dictionary<string, string> { ["projectId"] = repo.Project.Id, ["repository"] = repo.Id },
+                consumerInputs = new Dictionary<string, string> { ["url"] = hookUrl, ["httpHeaders"] = $"{headerName}:{headerValue}" },
+            };
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{organizationUrl.TrimEnd('/')}/_apis/hooks/subscriptions?api-version=7.1")
+            {
+                Content = JsonContent.Create(body),
+            };
+            req.Headers.TryAddWithoutValidation("Authorization", authorization);
+            using var res = await http.SendAsync(req, ct);
+            if (!res.IsSuccessStatusCode)
+            {
+                var text = await res.Content.ReadAsStringAsync(ct);
+                throw new ExternalServiceException($"Azure DevOps refused to create the {eventType} service hook ({(int)res.StatusCode}). " +
+                    "The PAT / service principal needs permission to manage service hooks in the project. " + text[..Math.Min(200, text.Length)]);
+            }
+            created++;
+        }
+        return created;
+    }
+
+    private sealed record RepoRef(string Id, string Name, ProjectRef Project);
+    private sealed record ProjectRef(string Id, string Name);
+    private sealed record Subscription(string Id, Dictionary<string, string>? ConsumerInputs);
+
     /// <summary>Azure DevOps puts the org name in the URL's user part (https://org@dev.azure.com/...); auth comes from the header instead.</summary>
     public static string CleanCloneUrl(string url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var u) && u.UserInfo.Length > 0

@@ -64,6 +64,64 @@ public sealed class TaskfilePlanner : ITaskfilePlanner
         return new TaskfilePlan(entry, jobs.Values.OrderBy(j => j.Order).ToList());
     }
 
+    public Domain.Triggers.TriggerSpec Triggers(string taskfileYaml)
+    {
+        var root = Load(taskfileYaml);
+        if (Get(root, "x-builder") is not YamlMappingNode xb || Get(xb, "triggers") is not { } t) return Domain.Triggers.TriggerSpec.None;
+        if (t is not YamlMappingNode tm) throw new TaskfileException("x-builder.triggers must be a mapping (push, pull-request, schedule).");
+        foreach (var key in tm.Children.Keys.Select(Scalar))
+            if (key is not ("push" or "pull-request" or "pr" or "schedule"))
+                throw new TaskfileException($"x-builder.triggers: unknown trigger '{key}' (use push, pull-request, schedule).");
+
+        Domain.Triggers.PushTrigger? push = null;
+        if (Get(tm, "push") is { } p && Filters(p, "push") is var (pb, pp, pv) && pb is not null)
+            push = new Domain.Triggers.PushTrigger(pb, pp, pv);
+        Domain.Triggers.PullRequestTrigger? pr = null;
+        if ((Get(tm, "pull-request") ?? Get(tm, "pr")) is { } r && Filters(r, "pull-request") is var (rb, rp, rv) && rb is not null)
+            pr = new Domain.Triggers.PullRequestTrigger(rb, rp, rv);
+
+        var schedules = new List<Domain.Triggers.ScheduleTrigger>();
+        var scheduleNodes = Get(tm, "schedule") switch
+        {
+            null => [],
+            YamlSequenceNode seq => seq.Children.ToList(),
+            YamlMappingNode single => [single],
+            _ => throw new TaskfileException("x-builder.triggers.schedule must be a list of { cron, branch }."),
+        };
+        foreach (var node in scheduleNodes)
+        {
+            if (node is not YamlMappingNode sm || Scalar(Get(sm, "cron")) is not { } cron)
+                throw new TaskfileException("Each schedule needs a cron expression, e.g. { cron: \"0 2 * * *\", branch: main }.");
+            var zone = Scalar(Get(sm, "timezone")) ?? "UTC";
+            try
+            {
+                Cronos.CronExpression.Parse(cron.Trim(), cron.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).Length == 6
+                    ? Cronos.CronFormat.IncludeSeconds : Cronos.CronFormat.Standard);
+                TimeZoneInfo.FindSystemTimeZoneById(zone);
+            }
+            catch (Exception ex) when (ex is Cronos.CronFormatException or TimeZoneNotFoundException)
+            {
+                throw new TaskfileException($"Schedule '{cron}' ({zone}): {ex.Message}");
+            }
+            schedules.Add(new Domain.Triggers.ScheduleTrigger(cron.Trim(), Scalar(Get(sm, "branch")) ?? "", zone, VarsOf(Get(sm, "vars"))));
+        }
+        return new Domain.Triggers.TriggerSpec(push, pr, schedules);
+
+        // true → all branches; "main" / [main, release/*] → branch list; { branches, paths, vars } → full form; false → off
+        (List<string>? Branches, List<string> Paths, Dictionary<string, string> Vars) Filters(YamlNode n, string what) => n switch
+        {
+            YamlScalarNode s when s.Value is "false" or "off" or "no" => (null, [], []),
+            YamlScalarNode s when IsTrue(s) => ([], [], []),
+            YamlScalarNode or YamlSequenceNode => (Strings(n).ToList(), [], []),
+            YamlMappingNode m => (Strings(Get(m, "branches")).ToList(), Strings(Get(m, "paths")).ToList(), VarsOf(Get(m, "vars"))),
+            _ => throw new TaskfileException($"x-builder.triggers.{what} must be true, a branch list or {{ branches, paths, vars }}."),
+        };
+
+        static Dictionary<string, string> VarsOf(YamlNode? v) => v is YamlMappingNode vm
+            ? vm.Children.Where(kv => Scalar(kv.Value) is not null).ToDictionary(kv => Scalar(kv.Key)!, kv => Scalar(kv.Value)!)
+            : [];
+    }
+
     private static PlannedJob ToJob(string key, string name, YamlNode node, List<string> deps, Dictionary<string, string> vars, int order)
     {
         var m = node as YamlMappingNode;

@@ -36,7 +36,7 @@ public sealed class BuildPlanningService(
         {
             var (remote, _) = await remotes.ForPipelineAsync(pipeline, ct);
             commit = build.Commit ?? await git.ResolveBranchAsync(remote, build.Branch, ct);
-            var yaml = await git.ReadFileAsync(remote, build.Branch, commit, pipeline.TaskfilePath, ct)
+            var yaml = await git.ReadFileAsync(remote, build.SourceRef ?? build.Branch, commit, pipeline.TaskfilePath, ct)
                 ?? throw new TaskfileException($"'{pipeline.TaskfilePath}' was not found at {commit[..Math.Min(8, commit.Length)]}.");
             var plan = planner.Plan(yaml, string.IsNullOrEmpty(build.EntryTask) ? pipeline.EntryTask : build.EntryTask);
             entry = plan.EntryTask;

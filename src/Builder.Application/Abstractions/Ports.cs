@@ -28,6 +28,7 @@ public interface IAppDbContext
     DbSet<Membership> Memberships { get; }
     DbSet<Repository> Repositories { get; }
     DbSet<Domain.Secrets.Secret> Secrets { get; }
+    DbSet<Domain.Triggers.RunnerSchedule> RunnerSchedules { get; }
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 }
 
@@ -49,6 +50,9 @@ public interface IGitService
 
     /// <summary>Files directly inside <paramref name="folder"/> at a commit (paths relative to the repository root).</summary>
     Task<IReadOnlyList<string>> ListFilesAsync(GitRemote remote, string branch, string commit, string folder, CancellationToken ct);
+
+    /// <summary>Paths changed between two commits (null when the host can't tell: then path filters don't apply).</summary>
+    Task<IReadOnlyList<string>?> ChangedFilesAsync(GitRemote remote, string branch, string baseCommit, string headCommit, CancellationToken ct);
 
     /// <summary>Branch names on the remote.</summary>
     Task<IReadOnlyList<string>> ListBranchesAsync(GitRemote remote, CancellationToken ct);
@@ -93,6 +97,9 @@ public interface ITaskfilePlanner
 {
     /// <summary>Builds the job graph reachable from the entry task. Throws <see cref="TaskfileException"/>.</summary>
     TaskfilePlan Plan(string taskfileYaml, string? entryTask);
+
+    /// <summary>The runner file's <c>x-builder.triggers</c> (push, pull-request, schedule). Throws <see cref="TaskfileException"/>.</summary>
+    Domain.Triggers.TriggerSpec Triggers(string taskfileYaml);
 }
 
 public interface IAgentGateway
@@ -154,6 +161,13 @@ public interface IAzureDevOpsClient
     Task<IReadOnlyList<string>> ListProjectsAsync(string organizationUrl, string authorization, CancellationToken ct);
     /// <summary>Enabled repositories, of one project or of the whole organization.</summary>
     Task<IReadOnlyList<RemoteRepositoryDto>> ListRepositoriesAsync(string organizationUrl, string? project, string authorization, CancellationToken ct);
+
+    /// <summary>
+    /// Creates service-hook subscriptions (git.push, git.pullrequest.created/updated) for one repository that post to
+    /// <paramref name="hookUrl"/> with the given header, replacing earlier ones to the same URL. Returns how many exist now.
+    /// </summary>
+    Task<int> InstallWebhooksAsync(string organizationUrl, string authorization, string project, string repository,
+        string hookUrl, string headerName, string headerValue, CancellationToken ct);
 }
 
 public interface IArtifactStore
@@ -220,4 +234,20 @@ public interface IAcrTokens
     public const string DockerUser = "00000000-0000-0000-0000-000000000000";
 
     Task<AccessToken> ExchangeAsync(string registry, string tenantId, string armToken, CancellationToken ct);
+}
+
+/// <summary>What a build reports back to the git host (Azure DevOps: commit status, or pull request status).</summary>
+public sealed record BuildStatusReport(string Commit, int? PullRequestId, string Name, string State, string Description, string? TargetUrl);
+
+/// <summary>Reports build status to the git host; hosts without status support ignore it.</summary>
+public interface IGitHostStatus
+{
+    Task ReportAsync(GitRemote remote, BuildStatusReport report, CancellationToken ct);
+}
+
+/// <summary>Where Builder's UI is reachable (links in statuses and webhook URLs). Builder:PublicUrl.</summary>
+public sealed class BuilderLinks
+{
+    public string? PublicUrl { get; set; }
+    public string? BuildUrl(Guid buildId) => PublicUrl is { Length: > 0 } u ? $"{u.TrimEnd('/')}/builds/{buildId}" : null;
 }

@@ -77,6 +77,8 @@ builder.Services.AddReverseProxy()
             // daemons reach the API through the same public endpoint; they authenticate with their agent token at the API
             new() { RouteId = "agent-hub", ClusterId = "api", AuthorizationPolicy = "anonymous", Match = new() { Path = "/hubs/agent/{**rest}" } },
             new() { RouteId = "agent-api", ClusterId = "api", AuthorizationPolicy = "anonymous", Match = new() { Path = "/api/agent/{**rest}" } },
+            // git host webhooks (authenticated by the repository's webhook secret at the API)
+            new() { RouteId = "agent-hooks", ClusterId = "api", AuthorizationPolicy = "anonymous", Match = new() { Path = "/hooks/{**rest}" } },
         ],
         [new() { ClusterId = "api", Destinations = new Dictionary<string, Yarp.ReverseProxy.Configuration.DestinationConfig> { ["api"] = new() { Address = apiUrl } } }])
     .AddTransforms(t => t.AddRequestTransform(ctx =>

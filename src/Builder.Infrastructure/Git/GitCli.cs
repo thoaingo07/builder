@@ -51,6 +51,16 @@ public sealed partial class GitCli(IOptions<BuilderStorageOptions> options) : IG
             return (IReadOnlyList<string>)tree.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList();
         });
 
+    public Task<IReadOnlyList<string>?> ChangedFilesAsync(GitRemote remote, string branch, string baseCommit, string headCommit, CancellationToken ct) =>
+        WithCommitAsync(remote, branch, headCommit, ct, async dir =>
+        {
+            if ((await RunAsync(dir, null, ct, "cat-file", "-e", $"{baseCommit}^{{commit}}")).ExitCode != 0
+                && (await RunAsync(dir, remote, ct, "fetch", "--quiet", "--depth", "50", remote.Url, baseCommit)).ExitCode != 0)
+                return (IReadOnlyList<string>?)null; // base not reachable (new branch, force push): no path filtering
+            var diff = await RunAsync(dir, null, ct, "diff", "--name-only", baseCommit, headCommit);
+            return diff.ExitCode != 0 ? null : diff.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList();
+        });
+
     public async Task<IReadOnlyList<string>> ListBranchesAsync(GitRemote remote, CancellationToken ct)
     {
         var r = await RunAsync(null, remote, ct, "ls-remote", "--heads", remote.Url);
@@ -76,7 +86,7 @@ public sealed partial class GitCli(IOptions<BuilderStorageOptions> options) : IG
             {
                 var byCommit = await RunAsync(dir, remote, ct, "fetch", "--quiet", "--depth", "1", remote.Url, commit);
                 if (byCommit.ExitCode != 0)
-                    await RunCheckedAsync(dir, remote, ct, "fetch", "--quiet", remote.Url, $"+refs/heads/{branch}:refs/heads/{branch}");
+                    await RunCheckedAsync(dir, remote, ct, "fetch", "--quiet", remote.Url, RefSpec(branch));
             }
             return await action(dir);
         }
@@ -153,6 +163,11 @@ public sealed partial class GitCli(IOptions<BuilderStorageOptions> options) : IG
         }
         return (p.ExitCode, await stdout, await stderr);
     }
+
+    /// <summary>A branch name, or a full ref such as refs/pull/7/merge (pull request merge commits).</summary>
+    private static string RefSpec(string branchOrRef) => branchOrRef.StartsWith("refs/", StringComparison.Ordinal)
+        ? $"+{branchOrRef}:{branchOrRef}"
+        : $"+refs/heads/{branchOrRef}:refs/heads/{branchOrRef}";
 
     private static string Hash(string s) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(s)))[..24];
 

@@ -57,8 +57,13 @@ public static class Endpoints
         api.MapGet("/repositories/{id:guid}/branches", (Guid id, RepositoryService s, CancellationToken ct) => s.BranchesAsync(id, ct));
         api.MapGet("/repositories/{id:guid}/runner-files", (Guid id, string? branch, RepositoryService s, CancellationToken ct) =>
             s.RunnerFilesAsync(id, branch, ct));
-        api.MapPost("/repositories/{id:guid}/runners", (Guid id, MapRunnersInput input, RepositoryService s, PipelineService p, CancellationToken ct) =>
-            s.MapRunnersAsync(id, input, p, ct));
+        api.MapPost("/repositories/{id:guid}/runners", (Guid id, MapRunnersInput input, RepositoryService s, PipelineService p, TriggerService t, CancellationToken ct) =>
+            s.MapRunnersAsync(id, input, p, ct, t));
+        // webhooks: a new secret (manual setup), or automatic installation in Azure DevOps
+        api.MapPost("/repositories/{id:guid}/hook", (Guid id, string? origin, TriggerService t, CancellationToken ct) => t.NewHookSecretAsync(id, origin, ct));
+        api.MapPost("/repositories/{id:guid}/hook/install", (Guid id, string? origin, TriggerService t, CancellationToken ct) => t.InstallHooksAsync(id, origin, ct));
+        api.MapGet("/pipelines/{id:guid}/triggers", (Guid id, TriggerService t, CancellationToken ct) => t.TriggersOfAsync(id, ct));
+        api.MapPost("/pipelines/{id:guid}/triggers/refresh", (Guid id, TriggerService t, CancellationToken ct) => t.RefreshAsync(id, ct));
 
         // runners (mapped runner files)
         api.MapGet("/pipelines", (PipelineService s, CancellationToken ct) => s.ListAsync(ct));

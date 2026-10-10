@@ -40,6 +40,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ICurren
     public DbSet<Membership> Memberships => Set<Membership>();
     public DbSet<Repository> Repositories => Set<Repository>();
     public DbSet<Domain.Secrets.Secret> Secrets => Set<Domain.Secrets.Secret>();
+    public DbSet<Domain.Triggers.RunnerSchedule> RunnerSchedules => Set<Domain.Triggers.RunnerSchedule>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder b)
     {
@@ -96,6 +97,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ICurren
         });
         m.Entity<Repository>(e => e.ToTable("repositories"));
         m.Entity<Domain.Secrets.Secret>(e => e.ToTable("secrets"));
+        m.Entity<Domain.Triggers.RunnerSchedule>(e =>
+        {
+            e.ToTable("runner_schedules");
+            e.Property(x => x.Vars).HasJsonConversion();
+        });
+        m.Entity<Pipeline>().Property(x => x.Triggers).HasJsonConversion();
 
         // organization isolation: every org-scoped table is filtered to the current organization
         m.Entity<Pipeline>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
@@ -104,6 +111,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ICurren
         m.Entity<DeployEnvironment>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
         m.Entity<Deployment>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
         m.Entity<Repository>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
+        m.Entity<Domain.Triggers.RunnerSchedule>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
         m.Entity<Domain.Secrets.Secret>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
         m.Entity<Agent>().HasQueryFilter(x => OrgFilter == null || x.OrgId == null || x.OrgId == OrgFilter);
 
@@ -115,6 +123,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ICurren
         m.Entity<Build>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
         m.Entity<GitConnection>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
         m.Entity<DeployEnvironment>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
+        m.Entity<Domain.Triggers.RunnerSchedule>().HasOne<Pipeline>().WithMany().HasForeignKey(x => x.PipelineId).OnDelete(DeleteBehavior.Cascade);
+        m.Entity<Domain.Triggers.RunnerSchedule>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
         m.Entity<Domain.Secrets.Secret>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
         m.Entity<Agent>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
         m.Entity<Membership>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);

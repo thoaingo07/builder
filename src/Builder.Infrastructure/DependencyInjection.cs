@@ -32,6 +32,7 @@ public static class DependencyInjection
         services.AddHttpClient<AzureDevOpsGit>(c => c.Timeout = TimeSpan.FromSeconds(30))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false }); // sign-in redirect = bad PAT
         services.AddTransient<IGitService, GitRouter>();
+        services.AddTransient<IGitHostStatus>(sp => sp.GetRequiredService<AzureDevOpsGit>());
         services.AddSingleton<ITaskfilePlanner, TaskfilePlanner>();
         services.AddSingleton<IArtifactStore, FileArtifactStore>();
         services.AddSingleton<IAgentMetricsStore, InMemoryAgentMetricsStore>();

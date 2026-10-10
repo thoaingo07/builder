@@ -19,13 +19,13 @@ public static class Mapping
 
     public static BuildSummaryDto ToSummary(this Build b, string pipelineName) => new(
         b.Id, b.PipelineId, pipelineName, b.Number, b.Branch, b.Commit, b.EntryTask, b.Status, b.RequestedBy, b.Error,
-        b.QueuedAt, b.StartedAt, b.FinishedAt, Counts(b.Jobs));
+        b.QueuedAt, b.StartedAt, b.FinishedAt, Counts(b.Jobs), b.Reason, b.PullRequestId);
 
     public static BuildDetailDto ToDetail(this Build b, string pipelineName, List<ArtifactDto> artifacts,
         List<DeploymentDto> deployments) => new(
         b.Id, b.PipelineId, pipelineName, b.Number, b.Branch, b.Commit, b.EntryTask, b.Status, b.RequestedBy, b.Error,
         b.QueuedAt, b.StartedAt, b.FinishedAt, Counts(b.Jobs), b.Variables,
-        b.Jobs.OrderBy(j => j.Order).Select(j => j.ToDto()).ToList(), artifacts, deployments);
+        b.Jobs.OrderBy(j => j.Order).Select(j => j.ToDto()).ToList(), artifacts, deployments, b.Reason, b.PullRequestId, b.SourceRef);
 
     public static JobDto ToDto(this BuildJob j) => new(
         j.Id, j.BuildId, j.Key, j.TaskName, j.Description, j.Order, j.DependsOn, j.Labels, j.Artifacts, j.Secrets, j.Status,

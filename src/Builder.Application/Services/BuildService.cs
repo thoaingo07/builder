@@ -15,7 +15,7 @@ public sealed class BuildService(
     BuildEvents events)
 {
     public async Task<BuildSummaryDto> QueueAsync(Guid pipelineId, QueueBuildInput input, string user, CancellationToken ct,
-        string? commit = null)
+        string? commit = null, BuildReason reason = BuildReason.Manual, string? sourceRef = null, int? pullRequestId = null)
     {
         var pipeline = await db.Pipelines.FirstOrDefaultAsync(p => p.Id == pipelineId, ct)
             ?? throw new NotFoundException("Runner");
@@ -26,7 +26,7 @@ public sealed class BuildService(
         var build = Build.Queue(pipeline.OrgId, pipeline.Id, pipeline.NextBuildNumber(),
             string.IsNullOrWhiteSpace(input.Branch) ? defaultBranch : input.Branch.Trim(),
             string.IsNullOrWhiteSpace(input.EntryTask) ? null : input.EntryTask.Trim(),
-            vars, user, clock.UtcNow, commit);
+            vars, user, clock.UtcNow, commit, reason, sourceRef, pullRequestId);
         db.Builds.Add(build);
         await db.SaveChangesAsync(ct);
         scheduler.Wake();
@@ -38,7 +38,8 @@ public sealed class BuildService(
     {
         var old = await db.Builds.AsNoTracking().FirstOrDefaultAsync(b => b.Id == buildId, ct)
             ?? throw new NotFoundException("Build");
-        return await QueueAsync(old.PipelineId, new QueueBuildInput(old.Branch, old.EntryTask, old.Variables), user, ct, old.Commit);
+        return await QueueAsync(old.PipelineId, new QueueBuildInput(old.Branch, old.EntryTask, old.Variables), user, ct, old.Commit,
+            BuildReason.Rerun, old.SourceRef, old.PullRequestId);
     }
 
     public async Task<List<BuildSummaryDto>> ListAsync(Guid? pipelineId, BuildStatus? status, int take, CancellationToken ct)

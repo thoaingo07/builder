@@ -36,6 +36,8 @@ builder.Services.AddSingleton<IUiNotifier, SignalRUiNotifier>();
 builder.Services.AddHostedService<PlannerWorker>();
 builder.Services.AddHostedService<SchedulerWorker>();
 builder.Services.AddHostedService<AgentMonitorWorker>();
+builder.Services.AddHostedService<ScheduleWorker>();
+builder.Services.AddSingleton(new BuilderLinks { PublicUrl = config["Builder:PublicUrl"] });
 
 // --- auth: users arrive through the BFF with a short-lived JWT; agents use the shared agent token ---
 var jwt = config.GetSection("Auth:Jwt");
@@ -93,6 +95,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapBuilderApi();
+app.MapHooks();
 app.MapHub<UiHub>("/hubs/ui");
 app.MapHub<AgentHub>(AgentHubNames.Route);
 

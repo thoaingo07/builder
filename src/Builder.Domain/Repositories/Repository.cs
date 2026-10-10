@@ -14,8 +14,12 @@ public sealed class Repository : IOrgScoped
     public string Url { get; private set; } = "";
     public string DefaultBranch { get; private set; } = "main";
     public DateTimeOffset CreatedAt { get; private set; }
+    /// <summary>SHA-256 (hex) of the webhook secret Azure DevOps sends; the secret is shown once.</summary>
+    public string? HookSecretHash { get; private set; }
 
     private Repository() { }
+
+    public void SetHookSecretHash(string hash) => HookSecretHash = hash;
 
     public Repository(Guid orgId, Guid? connectionId, string? name, string url, string? defaultBranch, DateTimeOffset now)
     {

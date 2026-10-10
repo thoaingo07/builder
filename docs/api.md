@@ -78,7 +78,9 @@ type BuildSummaryDto = {
   id; pipelineId; pipelineName; number: number; branch; commit: string|null; entryTask
   status: BuildStatus; requestedBy; error: string|null
   queuedAt; startedAt: string|null; finishedAt: string|null; jobCounts: JobCounts
+  reason: BuildReason; pullRequestId: number|null
 }
+type BuildReason = 'Manual'|'Push'|'PullRequest'|'Schedule'|'Rerun'
 type ApprovalDto = { message: string; approvers: string[]; decidedBy: string|null; decidedAt: string|null; comment: string|null }
 type DeploySpecDto = { environment; compose; project; manifests; namespace; url }
 type JobDto = {
@@ -102,7 +104,17 @@ type RunInputsDto = { branch: string; entryTask: string; inputs: RunInputDto[] }
 type ArtifactDto = { id; jobId; name; sizeBytes: number; createdAt }
 type BuildDetailDto = BuildSummaryDto & {
   variables: Record<string,string>; jobs: JobDto[]; artifacts: ArtifactDto[]; deployments: DeploymentDto[]
+  sourceRef: string|null       // e.g. refs/pull/7/merge for pull request builds
 }
+
+// triggers (x-builder.triggers in the runner file)
+type PushTrigger = { branches: string[]; paths: string[]; vars: Record<string,string> }   // branches [] = all
+type PullRequestTrigger = { branches: string[]; paths: string[]; vars: Record<string,string> } // target branches
+type ScheduleTrigger = { cron: string; branch: string; timeZone: string; vars: Record<string,string> }
+type TriggerSpec = { push: PushTrigger|null; pullRequest: PullRequestTrigger|null; schedules: ScheduleTrigger[] }
+type ScheduleDto = { cron; timeZone; branch; nextRunAt: string|null; lastRunAt: string|null }
+type PipelineTriggersDto = { triggers: TriggerSpec; commit: string|null; error: string|null; schedules: ScheduleDto[] }
+type HookSetupDto = { url: string; header: string; secret: string|null; installed: number|null }  // secret shown once
 type LogLineDto = { id: number; jobId: string; timestamp: string; stream: 'Out'|'Err'|'System'; text: string
   step: number|null }          // index into JobDto.steps; null = setup before the first step
 
@@ -172,6 +184,10 @@ Current organization (`X-Org` required):
 | GET | `/repositories/{id}/branches` | `string[]` (default branch first) | |
 | GET | `/repositories/{id}/runner-files?branch=` | `RunnerFilesDto` (`.builder/runners/*.yml|yaml` at that branch) | |
 | POST | `/repositories/{id}/runners` | `MapRunnersInput` → `PipelineDto[]` (newly mapped; already-mapped files ignored) | Admin |
+| POST | `/repositories/{id}/hook?origin=` | `HookSetupDto` (new webhook secret for manual setup; old one stops working) | Admin |
+| POST | `/repositories/{id}/hook/install?origin=` | `HookSetupDto` (rotates the secret and creates the Azure DevOps service hooks; needs a public https URL) | Admin |
+| GET | `/pipelines/{id}/triggers` | `PipelineTriggersDto` (as read from the default branch) | |
+| POST | `/pipelines/{id}/triggers/refresh` | `PipelineTriggersDto` | |
 | GET | `/pipelines` | `PipelineDto[]` (runners) | |
 | GET/PUT/DELETE | `/pipelines/{id}` | `PipelineDto` / `PipelineInput` → `PipelineDto` / 204 (unmap) | /Admin/Admin |
 | GET | `/pipelines/{id}/taskfile?branch=` | `TaskfileDto` (404 if the file isn't on that branch) | |
@@ -216,3 +232,9 @@ A daemon connects out to the API (`/hubs/agent`, header `X-Agent-Token`). An org
 `POST /api/org/agent-token`) registers that organization's agents; the system token (`Agents:Token`) registers
 shared agents. Install: `Agent__ServerUrl=https://<api> Agent__Token=<token> dotnet Builder.Agent.dll` or the agent
 container image.
+
+## Webhooks (git hosts → Builder)
+
+`POST /hooks/azure-devops/{repositoryId}` (through the public endpoint; anonymous) with header
+`X-Builder-Hook: <secret>` (or Basic auth with the secret as password). Events: `git.push`,
+`git.pullrequest.created`, `git.pullrequest.updated`. Answers `202 { builds: [ids] }`, `401` for a wrong secret.

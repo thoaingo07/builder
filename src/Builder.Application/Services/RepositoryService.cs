@@ -110,7 +110,8 @@ public sealed class RepositoryService(
     }
 
     /// <summary>Maps the picked runner files into runners. Already-mapped files are left alone.</summary>
-    public async Task<List<PipelineDto>> MapRunnersAsync(Guid id, MapRunnersInput input, PipelineService pipelines, CancellationToken ct)
+    public async Task<List<PipelineDto>> MapRunnersAsync(Guid id, MapRunnersInput input, PipelineService pipelines, CancellationToken ct,
+        TriggerService? triggers = null)
     {
         current.RequireRole(OrgRole.Admin);
         var repo = await FindAsync(id, ct);
@@ -129,6 +130,10 @@ public sealed class RepositoryService(
             created.Add(runner.Id);
         }
         await db.SaveChangesAsync(ct);
+        // pick up the new runners' schedules right away
+        if (triggers is not null)
+            foreach (var runnerId in created)
+                try { await triggers.RefreshAsync(runnerId, ct); } catch (Exception ex) when (ex is ExternalServiceException or DomainException) { }
         return (await pipelines.ListAsync(ct)).Where(p => created.Contains(p.Id)).ToList();
     }
 

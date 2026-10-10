@@ -50,6 +50,34 @@ public sealed class SchedulerWorker(IServiceScopeFactory scopes, ISchedulerSigna
     }
 }
 
+/// <summary>Runs due schedules every 30 s; re-reads every runner's triggers hourly (safety net for missed webhooks).</summary>
+public sealed class ScheduleWorker(IServiceScopeFactory scopes, ILogger<ScheduleWorker> log) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+        var lastRefresh = DateTimeOffset.MinValue;
+        do
+        {
+            try
+            {
+                await using var scope = scopes.CreateAsyncScope();
+                var triggers = scope.ServiceProvider.GetRequiredService<TriggerService>();
+                if (DateTimeOffset.UtcNow - lastRefresh > TimeSpan.FromHours(1))
+                {
+                    lastRefresh = DateTimeOffset.UtcNow;
+                    await triggers.RefreshAllAsync(ct);
+                }
+                await triggers.RunDueSchedulesAsync(ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                log.LogError(ex, "Schedule worker failed");
+            }
+        } while (await timer.WaitForNextTickAsync(ct));
+    }
+}
+
 /// <summary>Broadcasts agent metrics to the UI and fails jobs of agents that vanished.</summary>
 public sealed class AgentMonitorWorker(IServiceScopeFactory scopes, ILogger<AgentMonitorWorker> log) : BackgroundService
 {

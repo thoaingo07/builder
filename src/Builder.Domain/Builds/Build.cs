@@ -4,6 +4,8 @@ namespace Builder.Domain.Builds;
 
 public enum BuildStatus { Planning, Running, Canceling, Succeeded, Failed, Canceled }
 
+public enum BuildReason { Manual, Push, PullRequest, Schedule, Rerun }
+
 public sealed class Build : IOrgScoped
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7();
@@ -16,6 +18,10 @@ public sealed class Build : IOrgScoped
     public Dictionary<string, string> Variables { get; private set; } = new();
     public BuildStatus Status { get; private set; } = BuildStatus.Planning;
     public string RequestedBy { get; private set; } = "";
+    public BuildReason Reason { get; private set; } = BuildReason.Manual;
+    /// <summary>A ref to fetch when the commit is not on the branch (pull request merge commits: refs/pull/{id}/merge).</summary>
+    public string? SourceRef { get; private set; }
+    public int? PullRequestId { get; private set; }
     public string? Error { get; private set; }
     public DateTimeOffset QueuedAt { get; private set; }
     public DateTimeOffset? StartedAt { get; private set; }
@@ -26,8 +32,12 @@ public sealed class Build : IOrgScoped
     private Build() { }
 
     public static Build Queue(Guid orgId, Guid pipelineId, int number, string branch, string? entryTask,
-        Dictionary<string, string>? variables, string requestedBy, DateTimeOffset now, string? commit = null) => new()
+        Dictionary<string, string>? variables, string requestedBy, DateTimeOffset now, string? commit = null,
+        BuildReason reason = BuildReason.Manual, string? sourceRef = null, int? pullRequestId = null) => new()
     {
+        Reason = reason,
+        SourceRef = sourceRef,
+        PullRequestId = pullRequestId,
         OrgId = orgId,
         PipelineId = pipelineId,
         Commit = commit,

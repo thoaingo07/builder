@@ -18,8 +18,19 @@ public sealed class Pipeline : IOrgScoped
     public string? EntryTask { get; private set; }
     public int LastBuildNumber { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
+    /// <summary>Triggers as found in the runner file on the default branch (refreshed on pushes there).</summary>
+    public Triggers.TriggerSpec? Triggers { get; private set; }
+    public string? TriggersCommit { get; private set; }
+    public string? TriggersError { get; private set; }
 
     private Pipeline() { }
+
+    public void TriggersRead(Triggers.TriggerSpec? triggers, string commit, string? error)
+    {
+        Triggers = triggers;
+        TriggersCommit = commit;
+        TriggersError = error;
+    }
 
     public Pipeline(Repository repository, string name, string taskfilePath, string? entryTask, DateTimeOffset now)
     {

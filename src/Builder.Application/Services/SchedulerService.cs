@@ -122,7 +122,7 @@ public sealed class SchedulerService(
         }
 
         return new JobAssignment(job.Id, build.Id, build.Number, pipeline.Name, job.TaskName, taskVars,
-            new GitSource(repository.Url, build.Branch, build.Commit!),
+            new GitSource(repository.Url, build.Branch, build.Commit!, build.SourceRef),
             pipeline.TaskfilePath, env, job.Artifacts.ToArray(),
             artifacts.Select(a => new ArtifactRef(a.Id, a.Name, $"/api/agent/artifacts/{a.Id}")).ToArray(),
             deploy, job.Secrets.ToArray());
