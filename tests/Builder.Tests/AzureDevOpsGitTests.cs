@@ -65,31 +65,6 @@ public class AzureDevOpsGitTests
     }
 
     [Theory]
-    [InlineData(true, "edit")]
-    [InlineData(false, "add")]
-    public async Task Commits_a_taskfile_with_a_push(bool exists, string changeType)
-    {
-        var stub = new Stub()
-            .On($"{Repo}/refs?filter=heads/main&api-version=7.1", Refs(("refs/heads/main", "head1")))
-            .On($"{Repo}/pushes?api-version=7.1", """{"commits":[{"commitId":"newsha"}]}""");
-        if (exists)
-            stub.On($"{Repo}/items?path=%2F.builder%2Frunners%2Fci.yml&includeContent=true&versionDescriptor.version=head1&versionDescriptor.versionType=commit&$format=json&api-version=7.1",
-                """{"path":"/.builder/runners/ci.yml","content":"old"}""");
-        var git = new AzureDevOpsGit(new HttpClient(stub));
-
-        var sha = await git.CommitFileAsync(Remote, "main", ".builder/runners/ci.yml", "new\r\n", "Update ci", "Dev", "dev@example.com", default);
-
-        Assert.Equal("newsha", sha);
-        var push = JsonNode.Parse(stub.Bodies.Single())!;
-        Assert.Equal("refs/heads/main", push["refUpdates"]![0]!["name"]!.GetValue<string>());
-        Assert.Equal("head1", push["refUpdates"]![0]!["oldObjectId"]!.GetValue<string>());   // optimistic: fails if the branch moved
-        var change = push["commits"]![0]!["changes"]![0]!;
-        Assert.Equal(changeType, change["changeType"]!.GetValue<string>());
-        Assert.Equal("/.builder/runners/ci.yml", change["item"]!["path"]!.GetValue<string>());
-        Assert.Equal("new\n", change["newContent"]!["content"]!.GetValue<string>());
-    }
-
-    [Theory]
     [InlineData(HttpStatusCode.NonAuthoritativeInformation, "text/html")]
     [InlineData(HttpStatusCode.Redirect, "text/html")]
     [InlineData(HttpStatusCode.Unauthorized, "application/json")]

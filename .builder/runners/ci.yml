@@ -1,0 +1,41 @@
+version: '3'
+
+# Builder builds itself. Runs from the repository root (Builder runs runners with `task --dir <root>`),
+# locally: task -d . -t .builder/runners/ci.yml
+x-builder:
+  entry: ci
+  triggers:
+    push:
+      branches: [main]
+      paths: ["src/**", "tests/**", "ui/**", "db/**", ".builder/**"]
+    pull-request:
+      branches: [main]
+
+tasks:
+  ci:
+    desc: Build and unit-test the backend, build the UI
+    deps: [unit-tests, ui]
+
+  restore:
+    cmds:
+      - dotnet restore Builder.slnx
+
+  build:
+    deps: [restore]
+    cmds:
+      - dotnet build Builder.slnx -c Release --no-restore
+
+  unit-tests:
+    desc: Fast tests only (the Aspire/PostgreSQL suites need a container runtime on the agent)
+    deps: [build]
+    cmds:
+      - >-
+        dotnet test Builder.slnx -c Release --no-build
+        --filter "FullyQualifiedName!~EndToEnd&FullyQualifiedName!~DeployTests&FullyQualifiedName!~DatabaseTests"
+
+  ui:
+    desc: Type-check and build the Vue UI
+    x-artifacts: [ui/dist/**]
+    cmds:
+      - npm --prefix ui ci --no-audit --no-fund
+      - npm --prefix ui run build

@@ -8,7 +8,7 @@ namespace Builder.Infrastructure.Git;
 
 /// <summary>
 /// <see cref="IGitService"/> for Azure DevOps Git over its REST API (7.1): the server never clones. Branches come from
-/// <c>refs</c>, files and folders from <c>items</c>, Taskfile edits are committed with <c>pushes</c>.
+/// <c>refs</c>, files and folders from <c>items</c>. Read-only: Builder never pushes to your repositories.
 /// Build agents still fetch with git.
 /// </summary>
 public sealed class AzureDevOpsGit(HttpClient http) : IGitService, IGitHostStatus
@@ -94,43 +94,6 @@ public sealed class AzureDevOpsGit(HttpClient http) : IGitService, IGitHostStatu
             .Select(ch => ch.Item!.Path.TrimStart('/')).ToList();
     }
 
-    public async Task<string> CommitFileAsync(GitRemote remote, string branch, string path, string content, string message,
-        string authorName, string authorEmail, CancellationToken ct)
-    {
-        var c = Coords(remote);
-        var head = await ResolveBranchAsync(remote, branch, ct);
-        var exists = await ReadFileAsync(remote, branch, head, path, ct) is not null;
-        var push = new
-        {
-            refUpdates = new[] { new { name = $"refs/heads/{branch}", oldObjectId = head } },
-            commits = new[]
-            {
-                new
-                {
-                    comment = message,
-                    author = new { name = authorName, email = authorEmail },
-                    changes = new[]
-                    {
-                        new
-                        {
-                            changeType = exists ? "edit" : "add",
-                            item = new { path = "/" + path.TrimStart('/') },
-                            newContent = new { content = content.ReplaceLineEndings("\n"), contentType = "rawtext" },
-                        },
-                    },
-                },
-            },
-        };
-        using var req = new HttpRequestMessage(HttpMethod.Post, $"{c.RepoApi}/pushes?{Api}") { Content = JsonContent.Create(push) };
-        Authorize(req, remote);
-        using var res = await http.SendAsync(req, ct);
-        if (res.StatusCode == HttpStatusCode.Conflict)
-            throw new ExternalServiceException($"'{branch}' moved while saving; reload the Taskfile and try again.");
-        await EnsureOkAsync(res, ct);
-        var result = await res.Content.ReadFromJsonAsync<PushResult>(ct);
-        return result?.Commits?.FirstOrDefault()?.CommitId ?? throw new ExternalServiceException("Azure DevOps did not return the new commit.");
-    }
-
     /// <summary>Commit status for push/manual builds, pull request status for PR builds (genre "builder", name = runner).</summary>
     public async Task ReportAsync(GitRemote remote, BuildStatusReport report, CancellationToken ct)
     {
@@ -177,9 +140,9 @@ public sealed class AzureDevOpsGit(HttpClient http) : IGitService, IGitHostStatu
         // a sign-in redirect / 203 means the PAT was not accepted
         if (res.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.NonAuthoritativeInformation or HttpStatusCode.Redirect
             || res.Content.Headers.ContentType?.MediaType == "text/html")
-            throw new ExternalServiceException("Azure DevOps rejected the credentials. Check the connection's PAT (scope Code: Read, or Read & write to save Taskfiles).");
+            throw new ExternalServiceException("Azure DevOps rejected the credentials. Check the connection's PAT (scope Code: Read).");
         if (res.StatusCode == HttpStatusCode.Forbidden)
-            throw new ExternalServiceException("The PAT has no access to this repository (needs Code: Read, or Read & write to save).");
+            throw new ExternalServiceException("The PAT has no access to this repository (needs Code: Read; Code: Status to report build results).");
         if (!res.IsSuccessStatusCode)
         {
             var body = await res.Content.ReadAsStringAsync(ct);
@@ -194,8 +157,6 @@ public sealed class AzureDevOpsGit(HttpClient http) : IGitService, IGitHostStatu
     private sealed record GitItem(string Path, bool? IsFolder, string? Content);
     private sealed record CommitDiff(List<Change>? Changes);
     private sealed record Change(GitItem? Item);
-    private sealed record PushResult(List<PushCommit>? Commits);
-    private sealed record PushCommit(string CommitId);
 }
 
 /// <summary>Routes Azure DevOps URLs to the REST implementation and everything else to the git CLI.</summary>
@@ -211,7 +172,4 @@ public sealed class GitRouter(AzureDevOpsGit azureDevOps, GitCli cli) : IGitServ
     public Task<IReadOnlyList<string>> ListBranchesAsync(GitRemote remote, CancellationToken ct) => For(remote).ListBranchesAsync(remote, ct);
     public Task<IReadOnlyList<string>?> ChangedFilesAsync(GitRemote remote, string branch, string baseCommit, string headCommit, CancellationToken ct) =>
         For(remote).ChangedFilesAsync(remote, branch, baseCommit, headCommit, ct);
-    public Task<string> CommitFileAsync(GitRemote remote, string branch, string path, string content, string message,
-        string authorName, string authorEmail, CancellationToken ct) =>
-        For(remote).CommitFileAsync(remote, branch, path, content, message, authorName, authorEmail, ct);
 }

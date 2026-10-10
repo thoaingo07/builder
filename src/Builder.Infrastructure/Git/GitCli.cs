@@ -96,32 +96,6 @@ public sealed partial class GitCli(IOptions<BuilderStorageOptions> options) : IG
         }
     }
 
-    public async Task<string> CommitFileAsync(GitRemote remote, string branch, string path, string content, string message,
-        string authorName, string authorEmail, CancellationToken ct)
-    {
-        var dir = Path.Combine(Path.GetTempPath(), "builder-commit-" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            await RunCheckedAsync(null, remote, ct, "clone", "--quiet", "--depth", "1", "--branch", branch, "--single-branch", remote.Url, dir);
-            var file = Path.GetFullPath(Path.Combine(dir, path));
-            if (!file.StartsWith(dir + Path.DirectorySeparatorChar)) throw new ExternalServiceException("Invalid Taskfile path.");
-            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-            await File.WriteAllTextAsync(file, content.ReplaceLineEndings("\n"), new UTF8Encoding(false), ct);
-            await RunCheckedAsync(dir, null, ct, "add", "--", path);
-            if ((await RunAsync(dir, null, ct, "diff", "--cached", "--quiet")).ExitCode != 0)
-            {
-                await RunCheckedAsync(dir, null, ct, "-c", $"user.name={authorName}", "-c", $"user.email={authorEmail}",
-                    "commit", "--quiet", "-m", message);
-                await RunCheckedAsync(dir, remote, ct, "push", "--quiet", "origin", $"HEAD:refs/heads/{branch}");
-            }
-            return (await RunCheckedAsync(dir, null, ct, "rev-parse", "HEAD")).Trim();
-        }
-        finally
-        {
-            TryDelete(dir);
-        }
-    }
-
     private static async Task<string> RunCheckedAsync(string? cwd, GitRemote? auth, CancellationToken ct, params string[] args)
     {
         var r = await RunAsync(cwd, auth, ct, args);

@@ -40,6 +40,7 @@ public interface IClock
 /// <summary>A git remote plus the HTTP Authorization header to use with it (never persisted to disk).</summary>
 public sealed record GitRemote(string Url, string? AuthorizationHeader);
 
+/// <summary>Read-only access to repositories: Builder never writes to your code (runner files are changed in the repo).</summary>
 public interface IGitService
 {
     /// <summary>Resolves a branch name to a commit SHA.</summary>
@@ -57,9 +58,6 @@ public interface IGitService
     /// <summary>Branch names on the remote.</summary>
     Task<IReadOnlyList<string>> ListBranchesAsync(GitRemote remote, CancellationToken ct);
 
-    /// <summary>Writes one file on a branch, commits and pushes. Returns the new commit SHA.</summary>
-    Task<string> CommitFileAsync(GitRemote remote, string branch, string path, string content, string message,
-        string authorName, string authorEmail, CancellationToken ct);
 }
 
 public sealed class TaskfileException(string message) : Exception(message);

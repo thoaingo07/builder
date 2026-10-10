@@ -47,7 +47,6 @@ public sealed record PipelineDto(
 public sealed record PipelineInput(string Name, string? EntryTask);
 
 public sealed record TaskfileDto(string Path, string Branch, string Commit, string Content);
-public sealed record SaveTaskfileInput(string? Branch, string Content, string? Message);
 public sealed record PlanRequest(string Content, string? EntryTask);
 public sealed record PlanJobDto(string Key, string TaskName, List<string> DependsOn, bool Approval, string? Deploy);
 public sealed record PlanPreviewDto(string EntryTask, List<PlanJobDto> Jobs, string? Error);

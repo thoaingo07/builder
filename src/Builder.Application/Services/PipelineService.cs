@@ -71,19 +71,6 @@ public sealed class PipelineService(
         return new TaskfileDto(p.TaskfilePath, b, commit, content);
     }
 
-    public async Task<TaskfileDto> SaveTaskfileAsync(Guid id, SaveTaskfileInput input, string userName, CancellationToken ct)
-    {
-        var (p, repo) = await WithRepositoryAsync(id, ct);
-        planner.Plan(input.Content, p.EntryTask); // refuse to commit a Taskfile Builder cannot plan
-        var remote = await remotes.ForRepositoryAsync(repo, ct);
-        var b = string.IsNullOrWhiteSpace(input.Branch) ? repo.DefaultBranch : input.Branch.Trim();
-        var message = string.IsNullOrWhiteSpace(input.Message) ? $"Update {p.TaskfilePath} via Builder" : input.Message.Trim();
-        var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.UserName == userName, ct);
-        var commit = await git.CommitFileAsync(remote, b, p.TaskfilePath, input.Content, message,
-            user?.DisplayName ?? userName, user?.Email ?? $"{userName}@builder.local", ct);
-        return new TaskfileDto(p.TaskfilePath, b, commit, input.Content);
-    }
-
     /// <summary>What the Run dialog must ask for: requires.vars of every task the runner's entry reaches, at that branch.</summary>
     public async Task<RunInputsDto> InputsAsync(Guid id, string? branch, string? entryTask, CancellationToken ct)
     {

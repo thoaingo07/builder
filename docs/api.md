@@ -13,7 +13,7 @@ A user belongs to one or more organizations. The UI keeps the **current organiza
 **`X-Org` header on every `/api` call** except `/api/me` and `POST /api/orgs`. Without it org-scoped endpoints
 return 400; with an organization the user is not a member of, 404. Roles: `Member` < `Admin` < `Owner`.
 
-- Member: view everything, run/cancel/re-run builds, approve (if listed as approver), edit Taskfiles.
+- Member: view everything, run/cancel/re-run builds, approve (if listed as approver). Runner files are changed in the repository, never from Builder.
 - Admin: + connections, repositories & runner mapping, environments, secrets, agents, members (not owners), cleanup.
 - Owner: + manage owners. An organization always keeps at least one owner.
 
@@ -42,7 +42,8 @@ type ConnectionType = 'AzureDevOps'|'Git'|'Azure'          // Azure = ARM / cont
 type ConnectionAuthKind = 'Pat'|'ServicePrincipal'
 type ConnectionDto = { id; name; type: ConnectionType; url; username: string|null; hasToken: boolean
   authKind: ConnectionAuthKind; tenantId: string|null; clientId: string|null }
-// AzureDevOps: url = https://dev.azure.com/<org> (normalized server-side), token = PAT (Code: Read, or Read & write to save Taskfiles)
+// AzureDevOps: url = https://dev.azure.com/<org> (normalized server-side), token = PAT with Code: Read, Code: Status
+// (build results on commits/PRs) and Service hooks: Read & write (only for "Install in Azure DevOps"). Builder never writes code.
 type ConnectionInput = { name; type; url; username?; token?: string|null; authKind?; tenantId?; clientId? }
 // token = PAT, or the client secret for ServicePrincipal; write-only, omit to keep
 type ConnectionTestDto = { ok: boolean; message: string }
@@ -191,7 +192,6 @@ Current organization (`X-Org` required):
 | GET | `/pipelines` | `PipelineDto[]` (runners) | |
 | GET/PUT/DELETE | `/pipelines/{id}` | `PipelineDto` / `PipelineInput` → `PipelineDto` / 204 (unmap) | /Admin/Admin |
 | GET | `/pipelines/{id}/taskfile?branch=` | `TaskfileDto` (404 if the file isn't on that branch) | |
-| PUT | `/pipelines/{id}/taskfile` | `{ branch, content, message }` → `TaskfileDto` (commit + push) | |
 | POST | `/pipelines/plan` | `{ content, entryTask? }` → `PlanPreviewDto` | |
 | GET | `/pipelines/{id}/inputs?branch=&entryTask=` | `RunInputsDto` (variables the Run dialog must ask for; a build without them fails planning) | |
 | POST | `/pipelines/{id}/builds` | `{ branch?, entryTask?, variables? }` → `BuildSummaryDto` | |

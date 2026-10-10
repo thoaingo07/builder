@@ -32,7 +32,7 @@ public sealed class ConnectionService(
         if (c.Type != ConnectionType.Git && c.TokenProtected is null)
             throw new DomainException(c.AuthKind == ConnectionAuthKind.ServicePrincipal
                 ? "A service principal connection needs its client secret."
-                : "An Azure DevOps connection needs a personal access token (scope: Code → Read; Read & write to commit Taskfile edits).");
+                : "An Azure DevOps connection needs a personal access token (scopes: Code → Read, Code → Status; Service hooks → Read & write only for automatic webhook installation).");
         db.Connections.Add(c);
         await db.SaveChangesAsync(ct);
         return c.ToDto();
