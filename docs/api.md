@@ -38,7 +38,7 @@ type MeDto = { user: UserDto; orgs: OrgDto[] }
 type OrgCreatedDto = { org: OrgDto; agentToken: string }      // token shown once
 type MemberDto = { userId; userName; displayName; email: string|null; role: OrgRole; canSignInWithGoogle: boolean; joinedAt }
 
-type ConnectionType = 'AzureDevOps'|'Git'|'Azure'          // Azure = ARM / container registries (service principal)
+type ConnectionType = 'AzureDevOps'|'Git'|'Azure'|'Registry'   // Azure = ARM / ACR (service principal); Registry = Docker Hub, GHCR… (url = registry host, username + access token)
 type ConnectionAuthKind = 'Pat'|'ServicePrincipal'
 type ConnectionDto = { id; name; type: ConnectionType; url; username: string|null; hasToken: boolean
   authKind: ConnectionAuthKind; tenantId: string|null; clientId: string|null }
@@ -83,7 +83,9 @@ type BuildSummaryDto = {
 }
 type BuildReason = 'Manual'|'Push'|'PullRequest'|'Schedule'|'Rerun'
 type ApprovalDto = { message: string; approvers: string[]; decidedBy: string|null; decidedAt: string|null; comment: string|null }
-type DeploySpecDto = { environment; compose; project; manifests; namespace; url }
+type DeploySpecDto = { environment; compose; project; manifests; namespace; url; container: ContainerDeployDto|null }
+type ContainerDeployDto = { strategy: 'BlueGreen'|'Recreate'; service; image; network; envFile: string|null; args: string[]
+  healthPath: string|null; healthPort: number|null; healthScheme: string; timeoutSeconds: number; keep: number; command: string[]|null }
 type JobDto = {
   id; buildId; key; taskName; description: string|null; order: number
   dependsOn: string[]; labels: string[]; artifacts: string[]; secrets: string[]; status: JobStatus
@@ -140,7 +142,7 @@ type EnvironmentDto = {
 type EnvironmentInput = Omit<EnvironmentDto,'id'|'hasPrivateKey'|'hasKubeconfig'|'hasAksClientSecret'>
   & { privateKey?: string|null; kubeconfig?: string|null; aksClientSecret?: string|null }
 
-type DeploymentStatus = 'Deploying'|'Active'|'Failed'|'Destroying'|'Destroyed'
+type DeploymentStatus = 'Deploying'|'Active'|'Failed'|'Destroying'|'Destroyed'|'Superseded'|'RollingBack'|'RolledBack'
 type DeploymentDto = {
   id; environmentId; environmentName; pipelineId; pipelineName; buildId; buildNumber: number; jobId
   name: string; url: string|null; status: DeploymentStatus; output: string|null; createdAt; updatedAt: string|null
@@ -211,6 +213,7 @@ Current organization (`X-Org` required):
 | GET/POST, PUT/DELETE | `/environments`, `/environments/{id}` | as before | /Admin |
 | GET | `/deployments?environmentId=&active=true` | `DeploymentDto[]` | |
 | POST | `/deployments/{id}/destroy` | `DeploymentDto` | |
+| POST | `/deployments/{id}/rollback` | `DeploymentDto` (container deployments: the previous container goes live again; RollingBack → RolledBack, the previous deployment → Active) | |
 | POST | `/cleanup` | `{ olderThanDays, keepLastPerPipeline, removeWorkspaces, dockerPrune }` → `{ buildsDeleted, artifactsDeleted, bytesFreed, agentsNotified }` | Admin |
 
 ## Live updates — SignalR hub `/hubs/ui`

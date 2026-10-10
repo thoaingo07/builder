@@ -169,6 +169,32 @@ Builder env vars available to every command: `BUILDER_BUILD_ID`, `BUILDER_BUILD_
 
 ## Environments (deploy targets)
 
+### Container deployments (blue-green / recreate)
+
+```yaml
+deploy-portal:
+  x-registries: [docker.io]                     # Container registry connection (user + token)
+  x-deploy:
+    environment: vps
+    strategy: blue-green                        # or recreate: stop the old one first (single-instance workers)
+    service: portal-web                         # the network alias the reverse proxy targets
+    image: thoaingo07/my-apps:portal-web-{{.BUILDER_COMMIT}}
+    network: blf_default
+    env-file: /opt/blf/env/portal.env           # stays on the server
+    args: [--memory, 1g]
+    command: []                                 # optional: arguments after the image
+    health: { path: /health/ready, port: 8006, scheme: https, timeout: 120 }   # omit path: the image's HEALTHCHECK
+    keep: 1                                     # stopped previous containers kept for rollback
+```
+
+The agent sends `deploy-container.sh` over SSH: pull, start the candidate next to the live container (alias
+`<service>-candidate`), wait until healthy (image HEALTHCHECK, or an HTTP probe from a curl container on the same
+network), then move the `<service>` alias to it and stop the old one (kept for rollback). Unhealthy: the candidate
+is removed and its last log lines go to the build log; the live container never stopped serving. Recreate stops
+the old container first and starts it again if the new one fails. Rollback and destroy are deployment actions.
+State lives in `~/.builder/containers/<service>` on the host; containers carry `builder.service` labels.
+
+
 | Type | Config | Built-in action | Teardown |
 |---|---|---|---|
 | `ssh-docker` (Docker **or Podman** host) | host, port, user, private key | scp compose file to `~/builder/<project>/` → `pull` (best effort) + `up -d` with the first of `docker compose`, `podman-compose`, `podman compose` found on the host | `<compose> down`, remove the folder |
