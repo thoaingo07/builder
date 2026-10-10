@@ -3,18 +3,24 @@ import NavAction from '@/components/NavAction.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '@/api/client'
 import type { BuildSummaryDto, DashboardDto, DeploymentDto } from '@/api/types'
-import { isBuildActive, relativeTime } from '@/lib/format'
+import { isBuildActive, isDeploymentGone, relativeTime } from '@/lib/format'
 import { debounce, upsert } from '@/lib/collections'
 import { useLiveStore } from '@/stores/live'
 import { useNotify } from '@/composables/useNotify'
 import { useNow } from '@/composables/useNow'
 import AgentCard from '@/components/AgentCard.vue'
+import { useBuildActions } from '@/composables/useBuildActions'
 import BuildsTable from '@/components/BuildsTable.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 
 const live = useLiveStore()
 const notify = useNotify()
 const now = useNow(5000)
+const actions = useBuildActions()
+async function rollback(d: DeploymentDto) {
+  const r = await actions.rollbackDeployment(d)
+  if (r) deployments.value = isDeploymentGone(r.status) ? deployments.value.filter(x => x.id !== r.id) : upsert(deployments.value, r)
+}
 
 const loading = ref(true)
 const stats = ref<DashboardDto['last24h']>({ succeeded: 0, failed: 0, canceled: 0, running: 0 })
@@ -64,7 +70,7 @@ onMounted(() => {
     }
   }))
   offs.push(live.onDeployment(d => {
-    deployments.value = d.status === 'Destroyed'
+    deployments.value = isDeploymentGone(d.status)
       ? deployments.value.filter(x => x.id !== d.id)
       : upsert(deployments.value, d)
   }))
@@ -141,10 +147,13 @@ onBeforeUnmount(() => offs.forEach(f => f()))
               </div>
               <StatusBadge :status="d.status" size="sm" />
             </div>
-            <UButton
-              v-if="d.url" :to="d.url" target="_blank" label="Open app" trailing-icon="i-lucide-external-link"
-              size="xs" variant="soft" class="mt-3"
-            />
+            <div class="mt-3 flex flex-wrap gap-1">
+              <UButton v-if="d.url" :to="d.url" target="_blank" label="Open app" trailing-icon="i-lucide-external-link" size="xs" variant="soft" />
+              <UButton
+                v-if="d.status === 'Active' && d.isContainer" size="xs" color="warning" variant="ghost" icon="i-lucide-undo-2" label="Roll back"
+                :loading="actions.busy.value === `rollback:${d.id}`" @click="rollback(d)"
+              />
+            </div>
           </UCard>
         </div>
       </section>

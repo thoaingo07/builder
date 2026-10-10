@@ -47,7 +47,7 @@ public static class Mapping
 
     public static DeploymentDto ToDto(this Deployment d, string pipelineName) => new(
         d.Id, d.EnvironmentId, d.EnvironmentName, d.PipelineId, pipelineName, d.BuildId, d.BuildNumber, d.JobId,
-        d.Name, d.Url, d.Status, d.Output, d.CreatedAt, d.UpdatedAt);
+        d.Name, d.Url, d.Status, d.Output, d.CreatedAt, d.UpdatedAt, d.Container is not null);
 
     public static ConnectionDto ToDto(this GitConnection c) =>
         new(c.Id, c.Name, c.Type, c.Url, c.Username, c.TokenProtected is not null, c.AuthKind, c.TenantId, c.ClientId);

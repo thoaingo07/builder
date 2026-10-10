@@ -80,6 +80,11 @@ function selectKey(key: string) {
 
 async function cancel() { if (build.value && await actions.cancel(build.value)) void load() }
 async function remove() { if (build.value && await actions.remove(build.value)) void router.push('/builds') }
+const canDestroy = (st: DeploymentDto['status']) => st === 'Active' || st === 'Failed' || st === 'Superseded' || st === 'RolledBack'
+async function rollback(d: DeploymentDto) {
+  const r = await actions.rollbackDeployment(d)
+  if (r && build.value) build.value.deployments = upsert(build.value.deployments, r)
+}
 async function destroy(d: DeploymentDto) {
   const r = await actions.destroyDeployment(d)
   if (r && build.value) build.value.deployments = upsert(build.value.deployments, r)
@@ -285,7 +290,11 @@ watch(() => props.id, (next, prev) => {
                 <div class="flex flex-wrap gap-1">
                   <UButton v-if="d.url && d.status === 'Active'" :to="d.url" target="_blank" size="xs" variant="soft" label="Open app" trailing-icon="i-lucide-external-link" />
                   <UButton
-                    v-if="d.status === 'Active' || d.status === 'Failed'" size="xs" color="error" variant="ghost"
+                    v-if="d.status === 'Active' && d.isContainer" size="xs" color="warning" variant="ghost" icon="i-lucide-undo-2" label="Roll back"
+                    :loading="actions.busy.value === `rollback:${d.id}`" @click="rollback(d)"
+                  />
+                  <UButton
+                    v-if="canDestroy(d.status)" size="xs" color="error" variant="ghost"
                     icon="i-lucide-trash-2" label="Destroy" :loading="actions.busy.value === `destroy:${d.id}`" @click="destroy(d)"
                   />
                 </div>
@@ -297,7 +306,11 @@ watch(() => props.id, (next, prev) => {
               <div class="flex justify-end gap-1">
                 <UButton v-if="row.original.url && row.original.status === 'Active'" :to="row.original.url" target="_blank" size="xs" variant="soft" label="Open app" trailing-icon="i-lucide-external-link" />
                 <UButton
-                  v-if="row.original.status === 'Active' || row.original.status === 'Failed'" size="xs" color="error" variant="ghost"
+                  v-if="row.original.status === 'Active' && row.original.isContainer" size="xs" color="warning" variant="ghost" icon="i-lucide-undo-2" label="Roll back"
+                  :loading="actions.busy.value === `rollback:${row.original.id}`" @click="rollback(row.original)"
+                />
+                <UButton
+                  v-if="canDestroy(row.original.status)" size="xs" color="error" variant="ghost"
                   icon="i-lucide-trash-2" label="Destroy" :loading="actions.busy.value === `destroy:${row.original.id}`" @click="destroy(row.original)"
                 />
               </div>

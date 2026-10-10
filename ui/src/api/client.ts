@@ -168,6 +168,8 @@ export const api = {
   deployments: {
     list: (q: { environmentId?: Guid | null; active?: boolean } = {}) => get<DeploymentDto[]>('/api/deployments', q),
     destroy: (id: Guid) => post<DeploymentDto>(`/api/deployments/${id}/destroy`),
+    /** the previous (kept) container goes live again; this one is stopped and kept */
+    rollback: (id: Guid) => post<DeploymentDto>(`/api/deployments/${id}/rollback`),
   },
 
   connections: {

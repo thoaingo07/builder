@@ -34,8 +34,8 @@ watch(open, async o => {
   Object.assign(s, { connectionId: NONE, project: '', url: '', name: '', defaultBranch: '' })
   projects.value = []; remoteRepos.value = []; branches.value = []; pickedRepo.value = undefined; branchError.value = null
   try {
-    // Azure (ARM) connections only issue registry/cloud tokens; they can't read git
-    connections.value = (await api.connections.list()).filter(c => c.type !== 'Azure')
+    // only git-capable connections (Azure and Registry ones issue registry/cloud tokens)
+    connections.value = (await api.connections.list()).filter(c => c.type === 'AzureDevOps' || c.type === 'Git')
     const first = connections.value.find(c => c.type === 'AzureDevOps') ?? connections.value[0]
     if (first) s.connectionId = first.id
   } catch (e) { notify.error(e, 'Could not load connections') }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { BuildStatus, DeploymentStatus, JobStatus } from '@/api/types'
-import { humanize, statusColor, statusIcon } from '@/lib/format'
+import { deploymentHint, humanize, statusColor, statusIcon } from '@/lib/format'
 
 const props = withDefaults(defineProps<{
   status: BuildStatus | JobStatus | DeploymentStatus
@@ -9,11 +9,14 @@ const props = withDefaults(defineProps<{
 }>(), { size: 'md' })
 
 const icon = computed(() => statusIcon(props.status))
+const hint = computed(() => deploymentHint[props.status as DeploymentStatus])
 </script>
 
 <template>
-  <UBadge
-    :color="statusColor(status)" variant="subtle" :size="size" :label="humanize(status)"
-    :icon="icon.name" :ui="{ leadingIcon: icon.spin ? 'animate-spin' : '' }"
-  />
+  <UTooltip :text="hint" :disabled="!hint">
+    <UBadge
+      :color="statusColor(status)" variant="subtle" :size="size" :label="humanize(status)"
+      :icon="icon.name" :ui="{ leadingIcon: icon.spin ? 'animate-spin' : '' }"
+    />
+  </UTooltip>
 </template>

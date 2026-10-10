@@ -73,6 +73,15 @@ export interface ApprovalDto {
 export interface DeploySpecDto {
   environment: string; compose: string | null; project: string | null
   manifests: string | null; namespace: string | null; url: string | null
+  /** single-container deploy (x-deploy.strategy) */
+  container: ContainerDeployDto | null
+}
+export type ContainerStrategy = 'BlueGreen' | 'Recreate'
+/** one container on an SSH host behind a network alias; traffic switches once healthy */
+export interface ContainerDeployDto {
+  strategy: ContainerStrategy; service: string; image: string; network: string; envFile: string | null
+  args: string[]; command: string[] | null
+  healthPath: string | null; healthPort: number | null; healthScheme: string; timeoutSeconds: number; keep: number
 }
 export interface JobDto {
   id: Guid; buildId: Guid; key: string; taskName: string; description: string | null; order: number
@@ -139,15 +148,17 @@ export type EnvironmentInput = Omit<EnvironmentDto, 'id' | 'hasPrivateKey' | 'ha
   privateKey?: string | null; kubeconfig?: string | null; aksClientSecret?: string | null
 }
 
-export type DeploymentStatus = 'Deploying' | 'Active' | 'Failed' | 'Destroying' | 'Destroyed'
+export type DeploymentStatus = 'Deploying' | 'Active' | 'Failed' | 'Destroying' | 'Destroyed' | 'Superseded' | 'RollingBack' | 'RolledBack'
 export interface DeploymentDto {
   id: Guid; environmentId: Guid; environmentName: string; pipelineId: Guid; pipelineName: string
   buildId: Guid; buildNumber: number; jobId: Guid; name: string; url: string | null
   status: DeploymentStatus; output: string | null; createdAt: IsoDate; updatedAt: IsoDate | null
+  /** a container deploy (blue-green/recreate): can be rolled back to the kept container */
+  isContainer: boolean
 }
 
-/** Azure = Azure Resource Manager / container registries (always a service principal). */
-export type ConnectionType = 'AzureDevOps' | 'Git' | 'Azure'
+/** Azure = Azure Resource Manager / ACR (always a service principal); Registry = Docker Hub, GHCR… (user + token). */
+export type ConnectionType = 'AzureDevOps' | 'Git' | 'Azure' | 'Registry'
 export type ConnectionAuthKind = 'Pat' | 'ServicePrincipal'
 export interface ConnectionDto {
   id: Guid; name: string; type: ConnectionType; url: string; username: string | null; hasToken: boolean

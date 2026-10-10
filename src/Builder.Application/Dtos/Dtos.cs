@@ -82,7 +82,7 @@ public sealed record EnvironmentInput(
 public sealed record DeploymentDto(
     Guid Id, Guid EnvironmentId, string EnvironmentName, Guid PipelineId, string PipelineName, Guid BuildId,
     int BuildNumber, Guid JobId, string Name, string? Url, DeploymentStatus Status, string? Output,
-    DateTimeOffset CreatedAt, DateTimeOffset? UpdatedAt);
+    DateTimeOffset CreatedAt, DateTimeOffset? UpdatedAt, bool IsContainer);
 
 public sealed record ConnectionDto(Guid Id, string Name, ConnectionType Type, string Url, string? Username, bool HasToken,
     ConnectionAuthKind AuthKind, string? TenantId, string? ClientId);

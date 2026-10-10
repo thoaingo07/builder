@@ -8,6 +8,7 @@ import StatusBadge from './StatusBadge.vue'
 import ApprovalBox from './ApprovalBox.vue'
 import LogViewer from './LogViewer.vue'
 import StepTimeline from './StepTimeline.vue'
+import ContainerDeployDetails from './ContainerDeployDetails.vue'
 
 const props = defineProps<{ buildId: string; job: JobDto; artifacts: ArtifactDto[] }>()
 const emit = defineEmits<{ jobUpdated: [JobDto]; selectKey: [string] }>()
@@ -67,7 +68,7 @@ const facts = computed(() => [
 
     <ApprovalBox v-if="job.approval" :build-id="buildId" :job="job" @decided="j => emit('jobUpdated', j)" />
 
-    <UCard v-if="job.deploy" :ui="{ body: 'sm:p-3 p-3' }">
+    <UCard v-if="job.deploy" class="shrink-0" :ui="{ body: 'sm:p-3 p-3' }">
       <div class="mb-2 flex items-center gap-2 text-sm font-medium">
         <UIcon name="i-lucide-rocket" class="text-primary" /> Deploys to <span class="font-semibold">{{ job.deploy.environment }}</span>
         <span class="flex-1" />
@@ -78,6 +79,7 @@ const facts = computed(() => [
           <template v-if="v"><dt class="text-muted">{{ k }}</dt><dd class="truncate">{{ v }}</dd></template>
         </template>
       </dl>
+      <ContainerDeployDetails v-if="job.deploy.container" :c="job.deploy.container" class="mt-2 border-t border-default pt-2" />
     </UCard>
 
     <div v-if="myArtifacts.length || job.artifacts.length" class="space-y-1">

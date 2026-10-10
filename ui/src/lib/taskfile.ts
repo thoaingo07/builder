@@ -1,4 +1,5 @@
 import { Document, isMap, isScalar, isSeq, parseDocument, YAMLMap, type Pair } from 'yaml'
+type YamlMap = YAMLMap
 
 /**
  * Read-only model of a go-task Taskfile with Builder's x- extensions.
@@ -30,7 +31,16 @@ export interface RequiredVar { name: string; enum: string[] }
 export interface ApprovalModel { message: string; approvers: string[] }
 /** x-registries entry: a registry host, optionally logged in through a named connection. */
 export interface RegistryModel { registry: string; connection: string }
-export interface DeployModel { environment: string; compose: string; project: string; manifests: string; namespace: string; url: string }
+export interface ContainerModel {
+  strategy: 'BlueGreen' | 'Recreate'; service: string; image: string; network: string; envFile: string | null
+  args: string[]; command: string[] | null
+  healthPath: string | null; healthPort: number | null; healthScheme: string; timeoutSeconds: number; keep: number
+}
+export interface DeployModel {
+  environment: string; compose: string; project: string; manifests: string; namespace: string; url: string
+  /** x-deploy.strategy (blue-green / recreate): a single container behind a network alias */
+  container: ContainerModel | null
+}
 
 export interface TaskModel {
   name: string
@@ -158,6 +168,7 @@ function readTask(name: string, node: unknown): TaskModel {
       t.deploy = {
         environment: str(deploy.get('environment')), compose: str(deploy.get('compose')), project: str(deploy.get('project')),
         manifests: str(deploy.get('manifests')), namespace: str(deploy.get('namespace')), url: str(deploy.get('url')),
+        container: readContainer(deploy),
       }
     }
   }
@@ -172,6 +183,23 @@ function readCmd(n: unknown): CmdModel {
     return { kind: 'other', text: String(n).trim() }
   }
   return { kind: 'other', text: str(n) }
+}
+
+/** Mirrors the server's reading of x-deploy.strategy (defaults: timeout 120 s, keep 1, scheme http). */
+function readContainer(d: YamlMap): ContainerModel | null {
+  const strategy = str(d.get('strategy')).toLowerCase()
+  if (!strategy) return null
+  const health = d.get('health', true)
+  const h = (k: string) => (isMap(health) ? str(health.get(k)) : '')
+  const num = (v: string) => (/^\d+$/.test(v) ? Number(v) : null)
+  const command = stringList(d.get('command', true))
+  return {
+    strategy: strategy === 'recreate' ? 'Recreate' : 'BlueGreen',
+    service: str(d.get('service')), image: str(d.get('image')), network: str(d.get('network')),
+    envFile: str(d.get('env-file')) || null, args: stringList(d.get('args', true)), command: command.length ? command : null,
+    healthPath: h('path') || null, healthPort: num(h('port')), healthScheme: h('scheme') || 'http',
+    timeoutSeconds: num(h('timeout').replace(/s$/, '')) ?? 120, keep: num(str(d.get('keep'))) ?? 1,
+  }
 }
 
 const STEP_KEYS: Record<StepKindModel, string[]> = {

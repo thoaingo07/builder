@@ -21,6 +21,7 @@ declare module 'vue' {
     ChangePasswordModal: typeof import('./src/components/ChangePasswordModal.vue')['default']
     CodeEditor: typeof import('./src/components/CodeEditor.vue')['default']
     ConfirmModal: typeof import('./src/components/ConfirmModal.vue')['default']
+    ContainerDeployDetails: typeof import('./src/components/ContainerDeployDetails.vue')['default']
     CreateOrgModal: typeof import('./src/components/org/CreateOrgModal.vue')['default']
     DataList: typeof import('./src/components/DataList.vue')['default']
     EnvironmentFormModal: typeof import('./src/components/environments/EnvironmentFormModal.vue')['default']

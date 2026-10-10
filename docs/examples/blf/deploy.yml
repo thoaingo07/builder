@@ -1,0 +1,142 @@
+version: '3'
+
+# DRAFT runner file for the BLF repository: copy to .builder/runners/deploy.yml in BLF (via a PR).
+# Builds the images, pushes them to Docker Hub, waits for approval, migrates the database, then deploys each
+# web app blue-green behind Caddy (which already routes to the service names on the `blf` network) and
+# admin-jobs one-at-a-time.
+#
+# Placeholders to confirm on the VPS before the first run:
+#   BLF_DIR   where deploy/ lives on the VPS (env/, certs/, media/)          → vars below
+#   network   compose project "blf" + network "blf" → "blf_blf"
+#   volumes   compose named volumes get the project prefix: blf_blf-uploads, blf_nt-uploads
+# Builder needs: an SshDocker environment "blf-vps" (deploy user in the docker group), a Container registry
+# connection for docker.io (Docker ID + access token with write access to thoaingo07/my-apps).
+
+x-builder:
+  entry: release
+
+# Image tags use the full commit (BUILDER_COMMIT): x-deploy values are filled from the build's variables.
+vars:
+  REPO: thoaingo07/my-apps
+  BLF_DIR: /opt/blf/deploy
+
+tasks:
+  release:
+    desc: Build, approve, migrate, deploy
+    deps: [deploy-portal, deploy-admin, deploy-blf, deploy-nt, deploy-jobs]
+
+  # ------------------------------------------------------------------ images (in parallel)
+  image:
+    desc: Build and push one image (Builder runs each dependency below as its own job, in parallel)
+    requires:
+      vars: [SERVICE, DOCKERFILE]
+    x-registries: [docker.io]
+    cmds:
+      - docker build -f {{.DOCKERFILE}} --build-arg REVISION={{.BUILDER_COMMIT}} -t {{.REPO}}:{{.SERVICE}}-{{.BUILDER_COMMIT}} .
+      - docker push {{.REPO}}:{{.SERVICE}}-{{.BUILDER_COMMIT}}
+
+  images:
+    deps:
+      - task: image
+        vars: { SERVICE: portal-web, DOCKERFILE: Dockerfile.Portal }
+      - task: image
+        vars: { SERVICE: admin-web, DOCKERFILE: Dockerfile.Admin }
+      - task: image
+        vars: { SERVICE: blf-web, DOCKERFILE: Dockerfile.BLF }
+      - task: image
+        vars: { SERVICE: nt-web, DOCKERFILE: Dockerfile.NT }
+      - task: image
+        vars: { SERVICE: admin-jobs, DOCKERFILE: Dockerfile.Jobs }
+      - task: image
+        vars: { SERVICE: migrator, DOCKERFILE: Dockerfile.Migrator }
+
+  # ------------------------------------------------------------------ gate + database
+  approve:
+    deps: [images]
+    x-approval:
+      message: Deploy this commit to the BLF VPS?
+
+  migrate:
+    desc: Database migrations before any app switches (must stay compatible with the running version)
+    deps: [approve]
+    x-deploy: { environment: blf-vps }      # only for $DEPLOY_SSH; nothing is deployed by Builder here
+    cmds:
+      - $DEPLOY_SSH "docker run --rm --network blf_blf --env-file {{.BLF_DIR}}/env/migrator.env {{.REPO}}:migrator-{{.BUILDER_COMMIT}} up"
+
+  # ------------------------------------------------------------------ web apps: blue-green
+  deploy-portal:
+    deps: [migrate]
+    x-deploy:
+      environment: blf-vps
+      strategy: blue-green
+      service: portal-web
+      image: thoaingo07/my-apps:portal-web-{{.BUILDER_COMMIT}}
+      network: blf_blf
+      env-file: /opt/blf/deploy/env/portal-web.env
+      args: [-v, /opt/blf/deploy/certs:/certs:ro, -v, /opt/blf/deploy/media:/app/wwwroot/uploads,
+             -e, "Kestrel__Endpoints__Https__Url=https://*:8006", -e, "Kestrel__Endpoints__HttpsSecondTenant__Url=https://*:8007",
+             -e, DataProtection__Store=Database, -e, DataProtection__Enforce=true,
+             -e, "ForwardedHeaders__KnownNetworks__0=172.31.250.0/24"]
+      health: { path: /health/ready, port: 8006, scheme: https, timeout: 180 }
+      keep: 1
+
+  deploy-admin:
+    deps: [migrate]
+    x-deploy:
+      environment: blf-vps
+      strategy: blue-green
+      service: admin-web
+      image: thoaingo07/my-apps:admin-web-{{.BUILDER_COMMIT}}
+      network: blf_blf
+      env-file: /opt/blf/deploy/env/admin-web.env
+      args: [-v, /opt/blf/deploy/certs:/certs:ro, -e, "ForwardedHeaders__KnownNetworks__0=172.31.250.0/24"]
+      health: { path: /health/ready, port: 8005, scheme: https, timeout: 180 }
+      keep: 1
+
+  deploy-blf:
+    deps: [migrate]
+    x-deploy:
+      environment: blf-vps
+      strategy: blue-green
+      service: blf-web
+      image: thoaingo07/my-apps:blf-web-{{.BUILDER_COMMIT}}
+      network: blf_blf
+      env-file: /opt/blf/deploy/env/blf-web.env
+      args: [-v, /opt/blf/deploy/certs:/certs:ro, -v, /opt/blf/deploy/media:/app/media:ro, -v, blf_blf-uploads:/app/wwwroot/uploads,
+             -e, "Kestrel__Endpoints__Https__Url=https://*:8002", -e, DataProtection__Enforce=true,
+             -e, "ForwardedHeaders__KnownNetworks__0=172.31.250.0/24"]
+      health: { path: /health/ready, port: 8002, scheme: https, timeout: 180 }
+      keep: 1
+
+  deploy-nt:
+    deps: [migrate]
+    x-deploy:
+      environment: blf-vps
+      strategy: blue-green
+      service: nt-web
+      image: thoaingo07/my-apps:nt-web-{{.BUILDER_COMMIT}}
+      network: blf_blf
+      env-file: /opt/blf/deploy/env/nt-web.env
+      args: [-v, /opt/blf/deploy/certs:/certs:ro, -v, /opt/blf/deploy/media:/app/media:ro, -v, blf_nt-uploads:/app/wwwroot/uploads,
+             -e, "Kestrel__Endpoints__Https__Url=https://*:8003", -e, DataProtection__Store=Database, -e, DataProtection__Enforce=true,
+             -e, "ForwardedHeaders__KnownNetworks__0=172.31.250.0/24"]
+      health: { path: /health/ready, port: 8003, scheme: https, timeout: 180 }
+      keep: 1
+
+  # ------------------------------------------------------------------ background jobs: never two at once
+  deploy-jobs:
+    deps: [deploy-portal, deploy-admin]
+    x-deploy:
+      environment: blf-vps
+      strategy: recreate
+      service: admin-jobs
+      image: thoaingo07/my-apps:admin-jobs-{{.BUILDER_COMMIT}}
+      network: blf_blf
+      env-file: /opt/blf/deploy/env/admin-jobs.env
+      # HAZARD: the legacy CRM service drains the Outbox; this composition must keep it off.
+      # The health check repeats Dockerfile.Jobs' HEALTHCHECK: Podman's default (OCI) image format drops it.
+      args: [-v, /opt/blf/deploy/certs:/certs:ro, -e, Outbox__Enabled=false,
+             --health-cmd, 'f=/tmp/admin-jobs.health.json; [ -n "$(find "$f" -mmin -2 2>/dev/null)" ] && grep -Eq "\"status\":\"(Healthy|Degraded)\"" "$f"',
+             --health-interval, 15s, --health-timeout, 5s, --health-start-period, 60s, --health-retries, "3"]
+      health: { timeout: 180 }
+      keep: 1

@@ -52,6 +52,8 @@ public sealed class BlueGreenTests(AspireFixture aspire) : IDisposable
         {
             var v1 = await DeployAsync(http, runner, "v1");
             Assert.Equal("v1", await ServedAsync());
+            Assert.True((await E2E.GetAsync(http, "/api/deployments")).AsArray()
+                .Single(d => d!["id"]!.GetValue<string>() == v1)!["isContainer"]!.GetValue<bool>());
             var v2 = await DeployAsync(http, runner, "v2");
             Assert.Equal("v2", await ServedAsync());
             Assert.Equal("Superseded", await StatusAsync(http, v1));

@@ -56,5 +56,19 @@ export function useBuildActions() {
     } catch (e) { notify.error(e, 'Destroy failed'); return null } finally { busy.value = null }
   }
 
-  return { busy, cancel, rerun, remove, destroyDeployment }
+  async function rollbackDeployment(d: DeploymentDto) {
+    if (!await confirm({
+      title: 'Roll back deployment',
+      message: `Roll back "${d.name}" on ${d.environmentName}?\nThe previous container goes live again; this one is stopped and kept.`,
+      confirmLabel: 'Roll back', danger: true,
+    })) return null
+    busy.value = `rollback:${d.id}`
+    try {
+      const r = await api.deployments.rollback(d.id)
+      notify.info(`Rolling back ${d.name}`, 'An agent switches traffic to the previous container.')
+      return r
+    } catch (e) { notify.error(e, 'Roll back failed'); return null } finally { busy.value = null }
+  }
+
+  return { busy, cancel, rerun, remove, destroyDeployment, rollbackDeployment }
 }

@@ -31,7 +31,8 @@ const ARM_URL = 'https://management.azure.com'
 const typeItems = [
   { label: 'Azure DevOps', value: 'AzureDevOps', icon: 'i-lucide-cloud-cog' },
   { label: 'Git (GitHub, GitLab, any HTTPS remote)', value: 'Git', icon: 'i-lucide-git-fork' },
-  { label: 'Azure (container registries)', value: 'Azure', icon: 'i-lucide-cloud' },
+  { label: 'Azure (ACR, service principal)', value: 'Azure', icon: 'i-lucide-cloud' },
+  { label: 'Container registry (Docker Hub, GHCR…)', value: 'Registry', icon: 'i-lucide-container' },
 ]
 const authItems = [
   { label: 'Personal access token', value: 'Pat' },
@@ -39,13 +40,14 @@ const authItems = [
 ]
 const isAzure = computed(() => s.type === 'AzureDevOps')
 const isArm = computed(() => s.type === 'Azure')
+const isRegistry = computed(() => s.type === 'Registry')
 /** Azure (ARM) connections are always service principals; Git ones always token-based. */
 const isSp = computed(() => isArm.value || (isAzure.value && s.authKind === 'ServicePrincipal'))
 /** The stored secret only counts if it is the same kind we are editing. */
 const hasStoredSecret = computed(() => !!editing.value?.hasToken && editing.value.authKind === (isSp.value ? 'ServicePrincipal' : 'Pat'))
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const typeLabel = (t: ConnectionType) => (t === 'AzureDevOps' ? 'Azure DevOps' : t === 'Azure' ? 'Azure' : 'Git')
-const typeIcon = (t: ConnectionType) => (t === 'AzureDevOps' ? 'i-lucide-cloud-cog' : t === 'Azure' ? 'i-lucide-cloud' : 'i-lucide-git-fork')
+const typeLabel = (t: ConnectionType) => ({ AzureDevOps: 'Azure DevOps', Azure: 'Azure', Registry: 'Registry', Git: 'Git' }[t])
+const typeIcon = (t: ConnectionType) => ({ AzureDevOps: 'i-lucide-cloud-cog', Azure: 'i-lucide-cloud', Registry: 'i-lucide-container', Git: 'i-lucide-git-fork' }[t])
 
 const columns: TableColumn<ConnectionDto>[] = [
   { accessorKey: 'name', header: 'Name' },
@@ -73,7 +75,11 @@ function openForm(c: ConnectionDto | null) {
 function validate(v: typeof s): FormError[] {
   const errors: FormError[] = []
   if (!v.name.trim()) errors.push({ name: 'name', message: 'Required' })
-  if (v.type !== 'Azure') {
+  if (v.type === 'Registry') {
+    if (!v.url.trim()) errors.push({ name: 'url', message: 'Registry host, e.g. docker.io' })
+    if (!v.username.trim()) errors.push({ name: 'username', message: 'Required' })
+    if (!v.token.trim() && !hasStoredSecret.value) errors.push({ name: 'token', message: 'Required' })
+  } else if (v.type !== 'Azure') {
     if (!v.url.trim()) errors.push({ name: 'url', message: 'Required' })
     else if (!/^https?:\/\//i.test(v.url.trim())) errors.push({ name: 'url', message: 'Must start with https://' })
   }
@@ -92,7 +98,7 @@ async function submit() {
   const sp = isSp.value
   const input: ConnectionInput = {
     name: s.name.trim(), type: s.type, url: isArm.value ? ARM_URL : s.url.trim(),
-    username: s.type === 'Git' ? (s.username.trim() || null) : null,
+    username: s.type === 'Git' || s.type === 'Registry' ? (s.username.trim() || null) : null,
     token: s.token.trim() || null,
     authKind: sp ? 'ServicePrincipal' : 'Pat',
     tenantId: sp ? s.tenantId.trim() : null,
@@ -155,7 +161,7 @@ onMounted(load)
                   <span class="font-medium text-highlighted">{{ c.name }}</span>
                   <UBadge :label="typeLabel(c.type)" color="neutral" variant="subtle" size="sm" :icon="typeIcon(c.type)" />
                   <UBadge v-if="c.authKind === 'ServicePrincipal'" label="Service principal" icon="i-lucide-shield-check" color="primary" variant="subtle" size="sm" />
-                  <UBadge v-else-if="c.hasToken" label="PAT" icon="i-lucide-key-round" color="neutral" variant="subtle" size="sm" />
+                  <UBadge v-else-if="c.hasToken" :label="c.type === 'Registry' ? 'Token' : 'PAT'" icon="i-lucide-key-round" color="neutral" variant="subtle" size="sm" />
                 </div>
                 <div class="truncate font-mono text-xs text-muted" :title="c.url">{{ c.type === 'Azure' ? (c.clientId ?? 'Azure Resource Manager') : c.url }}</div>
               </div>
@@ -181,7 +187,7 @@ onMounted(load)
                 v-if="row.original.authKind === 'ServicePrincipal'" label="Service principal" icon="i-lucide-shield-check"
                 color="primary" variant="subtle" size="sm"
               />
-              <UBadge v-else-if="row.original.hasToken" label="PAT" icon="i-lucide-key-round" color="neutral" variant="subtle" size="sm" />
+              <UBadge v-else-if="row.original.hasToken" :label="row.original.type === 'Registry' ? 'Token' : 'PAT'" icon="i-lucide-key-round" color="neutral" variant="subtle" size="sm" />
               <span v-if="row.original.authKind === 'ServicePrincipal'" class="truncate font-mono text-xs text-muted">{{ row.original.clientId }}</span>
               <span v-else class="text-xs" :class="row.original.hasToken ? 'text-muted' : 'text-dimmed'">
                 {{ row.original.hasToken ? (row.original.username ?? '') : 'Anonymous' }}
@@ -201,12 +207,12 @@ onMounted(load)
         <template #body>
           <UForm id="conn-form" :state="s" :validate="validate" class="space-y-4" @submit="submit">
             <UFormField label="Type" name="type"><USelect v-model="s.type" :items="typeItems" class="w-full" /></UFormField>
-            <UFormField label="Name" name="name" required><UInput v-model="s.name" class="w-full" :placeholder="isArm ? 'azure-prod' : isAzure ? 'contoso' : 'github'" /></UFormField>
+            <UFormField label="Name" name="name" required><UInput v-model="s.name" class="w-full" :placeholder="isArm ? 'azure-prod' : isAzure ? 'contoso' : isRegistry ? 'docker-hub' : 'github'" /></UFormField>
             <UFormField
-              v-if="!isArm" :label="isAzure ? 'Organization URL' : 'Host URL'" name="url" required
-              :help="isAzure ? 'Your Azure DevOps organization — it is normalized to https://dev.azure.com/<org>.' : 'Base URL of the git host, e.g. https://github.com'"
+              v-if="!isArm" :label="isAzure ? 'Organization URL' : isRegistry ? 'Registry host' : 'Host URL'" name="url" required
+              :help="isAzure ? 'Your Azure DevOps organization — it is normalized to https://dev.azure.com/<org>.' : isRegistry ? 'As used in image names: docker.io, ghcr.io, registry.gitlab.com…' : 'Base URL of the git host, e.g. https://github.com'"
             >
-              <UInput v-model="s.url" class="w-full font-mono" :placeholder="isAzure ? 'https://dev.azure.com/your-org' : 'https://github.com'" />
+              <UInput v-model="s.url" class="w-full font-mono" :placeholder="isAzure ? 'https://dev.azure.com/your-org' : isRegistry ? 'docker.io' : 'https://github.com'" />
             </UFormField>
 
             <UFormField v-if="isAzure" label="Authentication" name="authKind">
@@ -235,15 +241,24 @@ onMounted(load)
             </template>
 
             <template v-else>
-              <UFormField v-if="!isAzure" label="Username" name="username" help="Optional; some hosts need it together with the token.">
+              <UFormField
+                v-if="!isAzure" label="Username" name="username" :required="isRegistry"
+                :help="isRegistry ? 'Docker Hub: your Docker ID. GHCR: your GitHub user name.' : 'Optional; some hosts need it together with the token.'"
+              >
                 <UInput v-model="s.username" class="w-full" autocomplete="off" />
               </UFormField>
               <UFormField
-                :label="isAzure ? 'Personal access token' : 'Token / password'" name="token" :required="isAzure && !hasStoredSecret"
+                :label="isAzure ? 'Personal access token' : isRegistry ? 'Access token' : 'Token / password'" name="token" :required="(isAzure || isRegistry) && !hasStoredSecret"
                 :help="hasStoredSecret ? 'Stored ✓ — leave empty to keep it.' : undefined"
               >
                 <UInput v-model="s.token" type="password" class="w-full" autocomplete="new-password" :placeholder="hasStoredSecret ? '••••••••  (unchanged)' : ''" />
               </UFormField>
+              <UAlert v-if="isRegistry" color="neutral" variant="subtle" icon="i-lucide-info" title="Container registry">
+                <template #description>
+                  Used by <code>x-registries: [docker.io]</code> — the agent runs <code>docker login</code> for the job only and logs out afterwards.
+                  Use an access token (Docker Hub: <em>Account settings → Personal access tokens</em>; GHCR: a PAT with <strong>write:packages</strong>), not your password.
+                </template>
+              </UAlert>
               <UAlert v-if="isAzure" color="neutral" variant="subtle" icon="i-lucide-info" title="PAT scopes">
                 <template #description>
                   Create it under <em>User settings → Personal access tokens</em> with <strong>Code → Read</strong> and

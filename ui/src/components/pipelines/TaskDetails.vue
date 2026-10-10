@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { TaskModel } from '@/lib/taskfile'
 import KeyValueList from './KeyValueList.vue'
+import ContainerDeployDetails from '@/components/ContainerDeployDetails.vue'
 
 /** Read-only details of one task in a runner file. */
 const props = defineProps<{ task: TaskModel; isEntry: boolean; reachable: boolean }>()
@@ -124,6 +125,7 @@ const kindMeta = {
         <UIcon name="i-lucide-rocket" class="text-primary" /> Deploys to <span class="font-semibold">{{ task.deploy.environment || '—' }}</span>
       </div>
       <KeyValueList :entries="deploy" />
+      <ContainerDeployDetails v-if="task.deploy.container" :c="task.deploy.container" class="mt-2 border-t border-default pt-2" />
     </UCard>
   </div>
 </template>

@@ -55,7 +55,8 @@ export function statusColor(s: AnyStatus): UiColor {
   switch (s) {
     case 'Succeeded': case 'Active': return 'success'
     case 'Failed': return 'error'
-    case 'Running': case 'Assigned': case 'Deploying': case 'Destroying': return 'info'
+    case 'Running': case 'Assigned': case 'Deploying': case 'Destroying': case 'RollingBack': return 'info'
+    case 'RolledBack': return 'warning'
     case 'WaitingApproval': case 'Canceling': return 'warning'
     case 'Planning': case 'Queued': return 'primary'
     default: return 'neutral'
@@ -66,8 +67,10 @@ export function statusIcon(s: AnyStatus): { name: string; spin: boolean } {
   switch (s) {
     case 'Succeeded': case 'Active': return { name: 'i-lucide-circle-check', spin: false }
     case 'Failed': return { name: 'i-lucide-circle-x', spin: false }
-    case 'Running': case 'Assigned': case 'Deploying': case 'Destroying': case 'Canceling': case 'Planning':
+    case 'Running': case 'Assigned': case 'Deploying': case 'Destroying': case 'Canceling': case 'Planning': case 'RollingBack':
       return { name: 'i-lucide-loader-circle', spin: true }
+    case 'Superseded': return { name: 'i-lucide-archive', spin: false }
+    case 'RolledBack': return { name: 'i-lucide-undo-2', spin: false }
     case 'WaitingApproval': return { name: 'i-lucide-lock', spin: false }
     case 'Queued': case 'Pending': return { name: 'i-lucide-clock', spin: false }
     case 'Skipped': return { name: 'i-lucide-skip-forward', spin: false }
@@ -107,4 +110,12 @@ export function stepProgress(steps: JobStepDto[] | undefined) {
   const running = list.find(s => s.status === 'Running') ?? null
   const failed = list.find(s => s.status === 'Failed') ?? null
   return { total: list.length, done, running, failed }
+}
+
+/** Deployments that are no longer serving traffic (dropped from "active" lists). */
+export const isDeploymentGone = (s: DeploymentStatus) => s === 'Destroyed' || s === 'Superseded' || s === 'RolledBack'
+export const deploymentHint: Partial<Record<DeploymentStatus, string>> = {
+  Superseded: 'Replaced by a newer deployment. Container deployments are kept (stopped) for rollback.',
+  RolledBack: 'Rolled back: the previous deployment is live again; this one is stopped and kept.',
+  RollingBack: 'Switching back to the previous container…',
 }

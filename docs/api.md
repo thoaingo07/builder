@@ -146,6 +146,7 @@ type DeploymentStatus = 'Deploying'|'Active'|'Failed'|'Destroying'|'Destroyed'|'
 type DeploymentDto = {
   id; environmentId; environmentName; pipelineId; pipelineName; buildId; buildNumber: number; jobId
   name: string; url: string|null; status: DeploymentStatus; output: string|null; createdAt; updatedAt: string|null
+  isContainer: boolean  // x-deploy container (blue-green/recreate): rollback is possible
 }
 
 type PlanPreviewDto = { entryTask: string; jobs: { key; taskName; dependsOn: string[]; approval: boolean; deploy: string|null }[]; error: string|null }
