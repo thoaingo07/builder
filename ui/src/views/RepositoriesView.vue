@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ProjectBadge from '@/components/ProjectBadge.vue'
+import { useProjectStore } from '@/stores/project'
 import NavAction from '@/components/NavAction.vue'
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -12,6 +14,7 @@ import AddRepositoryModal from '@/components/repositories/AddRepositoryModal.vue
 import DataList from '@/components/DataList.vue'
 
 const org = useOrgStore()
+const project = useProjectStore()
 const router = useRouter()
 const notify = useNotify()
 const confirm = useConfirm()
@@ -28,7 +31,7 @@ const columns: TableColumn<RepositoryDto>[] = [
 ]
 
 async function load() {
-  try { repos.value = await api.repositories.list() } catch (e) { notify.error(e, 'Could not load repositories') } finally { loading.value = false }
+  try { repos.value = await api.repositories.list(project.query) } catch (e) { notify.error(e, 'Could not load repositories') } finally { loading.value = false }
 }
 
 async function remove(r: RepositoryDto) {
@@ -60,7 +63,9 @@ onMounted(load)
     <template #body>
       <UEmpty
         v-if="!loading && !repos.length" icon="i-lucide-folder-git-2" title="No repositories yet"
-        description="Add a repository, then map its runner files (.builder/runners/*.yml) to runners you can build."
+:description="project.projects.length
+          ? 'Add a repository, then map its runner files (.builder/runners/*.yml) to runners you can build.'
+          : 'No projects yet — create one under Projects first, or add a repository and Builder puts it in a new “Default” project.'"
         :actions="org.isAdmin ? [{ label: 'Add repository', icon: 'i-lucide-plus', onClick: () => { addOpen = true } }, { label: 'Connections', to: '/connections', color: 'neutral', variant: 'outline' }] : []"
       />
       <UCard v-else :ui="{ body: 'p-0 sm:p-0' }">
@@ -71,6 +76,7 @@ onMounted(load)
               <div class="min-w-0 flex-1 space-y-0.5">
                 <div class="flex items-center gap-1.5">
                   <span class="truncate font-medium text-highlighted">{{ r.name }}</span>
+                  <ProjectBadge :project-id="r.projectId" />
                   <UBadge :label="`${r.runnerCount} runner${r.runnerCount === 1 ? '' : 's'}`" :color="r.runnerCount ? 'primary' : 'neutral'" variant="subtle" size="sm" class="shrink-0" />
                 </div>
                 <div class="truncate font-mono text-xs text-muted" :title="r.url">{{ r.url }}</div>
@@ -87,7 +93,10 @@ onMounted(load)
             </div>
           </template>
           <template #name-cell="{ row }">
-            <div class="font-medium text-highlighted">{{ row.original.name }}</div>
+            <div class="flex items-center gap-1.5">
+              <span class="font-medium text-highlighted">{{ row.original.name }}</span>
+              <ProjectBadge :project-id="row.original.projectId" />
+            </div>
             <div class="max-w-md truncate font-mono text-xs text-muted">{{ row.original.url }}</div>
           </template>
           <template #connectionName-cell="{ row }">

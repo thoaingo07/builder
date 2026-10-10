@@ -5,6 +5,13 @@ export type IsoDate = string
 
 export interface UserDto { userName: string; displayName: string; isAdmin: boolean }
 
+export interface ProjectDto {
+  id: Guid; name: string; slug: string; description: string | null
+  repositoryCount: number; runnerCount: number; connectionCount: number; environmentCount: number; secretCount: number
+  createdAt: IsoDate
+}
+export interface ProjectInput { name: string; description?: string | null }
+
 export type OrgRole = 'Member' | 'Admin' | 'Owner'
 export interface OrgDto { id: Guid; name: string; slug: string; role: OrgRole; memberCount: number; createdAt: IsoDate }
 export interface MeDto { user: UserDto; orgs: OrgDto[] }
@@ -30,6 +37,7 @@ export interface BuildSummaryDto {
   error: string | null; queuedAt: IsoDate; startedAt: IsoDate | null; finishedAt: IsoDate | null
   jobCounts: JobCounts
   reason: BuildReason; pullRequestId: number | null
+  projectId: Guid
 }
 export type BuildReason = 'Manual' | 'Push' | 'PullRequest' | 'Schedule' | 'Rerun'
 
@@ -49,14 +57,17 @@ export interface HookSetupDto { url: string; header: string; secret: string | nu
 export interface PipelineDto {
   id: Guid; name: string; repositoryId: Guid; repositoryName: string; repositoryUrl: string; defaultBranch: string
   taskfilePath: string; entryTask: string | null; lastBuild: BuildSummaryDto | null
+  projectId: Guid
 }
 export interface PipelineInput { name: string; entryTask?: string | null }
 
 export interface RepositoryDto {
   id: Guid; name: string; url: string; connectionId: Guid | null; connectionName: string | null
   defaultBranch: string; runnerCount: number; createdAt: IsoDate
+  projectId: Guid
 }
-export interface RepositoryInput { connectionId?: Guid | null; name?: string | null; url: string; defaultBranch?: string | null }
+/** projectId: required when the org has 2+ projects; moving a repository = PUT with another projectId */
+export interface RepositoryInput { connectionId?: Guid | null; name?: string | null; url: string; defaultBranch?: string | null; projectId?: Guid | null }
 export interface RunnerFileDto {
   path: string; suggestedName: string; entryTask: string | null; tasks: string[]; error: string | null
   mappedRunnerId: Guid | null; mappedRunnerName: string | null
@@ -64,8 +75,10 @@ export interface RunnerFileDto {
 export interface RunnerFilesDto { branch: string; commit: string; files: RunnerFileDto[] }
 export interface MapRunnersInput { runners: { path: string; name?: string | null; entryTask?: string | null }[] }
 
-export interface SecretDto { id: Guid; name: string; description: string | null; updatedAt: IsoDate; updatedBy: string }
-export interface SecretInput { name: string; value?: string | null; description?: string | null }
+/** projectId null = shared by every project of the organization */
+export interface SecretDto { id: Guid; name: string; description: string | null; updatedAt: IsoDate; updatedBy: string; projectId: Guid | null }
+/** projectId: always send it (null = shared); omitting it on update makes the secret shared */
+export interface SecretInput { name: string; value?: string | null; description?: string | null; projectId: Guid | null }
 
 export interface ApprovalDto {
   message: string; approvers: string[]; decidedBy: string | null; decidedAt: IsoDate | null; comment: string | null
@@ -143,6 +156,8 @@ export interface EnvironmentDto {
   host: string | null; port: number; username: string | null; hasPrivateKey: boolean
   hasKubeconfig: boolean; aksTenantId: string | null; aksClientId: string | null; hasAksClientSecret: boolean
   aksSubscriptionId: string | null; aksResourceGroup: string | null; aksClusterName: string | null; aksAdmin: boolean
+  /** null = shared by every project */
+  projectId: Guid | null
 }
 export type EnvironmentInput = Omit<EnvironmentDto, 'id' | 'hasPrivateKey' | 'hasKubeconfig' | 'hasAksClientSecret'> & {
   privateKey?: string | null; kubeconfig?: string | null; aksClientSecret?: string | null
@@ -155,6 +170,7 @@ export interface DeploymentDto {
   status: DeploymentStatus; output: string | null; createdAt: IsoDate; updatedAt: IsoDate | null
   /** a container deploy (blue-green/recreate): can be rolled back to the kept container */
   isContainer: boolean
+  projectId: Guid
 }
 
 /** Azure = Azure Resource Manager / ACR (always a service principal); Registry = Docker Hub, GHCR… (user + token). */
@@ -163,11 +179,15 @@ export type ConnectionAuthKind = 'Pat' | 'ServicePrincipal'
 export interface ConnectionDto {
   id: Guid; name: string; type: ConnectionType; url: string; username: string | null; hasToken: boolean
   authKind: ConnectionAuthKind; tenantId: string | null; clientId: string | null
+  /** null = shared by every project */
+  projectId: Guid | null
 }
 /** `token` is the PAT, or the client secret for a service principal; write-only, omit to keep. */
 export interface ConnectionInput {
   name: string; type: ConnectionType; url: string; username?: string | null; token?: string | null
   authKind?: ConnectionAuthKind; tenantId?: string | null; clientId?: string | null
+  /** always send it (null = shared); omitting it on update makes the connection shared */
+  projectId: Guid | null
 }
 export interface ConnectionTestDto { ok: boolean; message: string }
 export interface RemoteRepositoryDto { project: string; name: string; url: string; defaultBranch: string | null }

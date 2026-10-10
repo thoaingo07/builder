@@ -7,6 +7,7 @@ import { shortSha } from '@/lib/format'
 import { useOrgStore } from '@/stores/org'
 import { useNotify } from '@/composables/useNotify'
 import WebhooksCard from '@/components/repositories/WebhooksCard.vue'
+import { useProjectStore } from '@/stores/project'
 import DataList from '@/components/DataList.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
 
@@ -23,6 +24,30 @@ const filesError = ref<string | null>(null)
 const loadingFiles = ref(false)
 const mapping = ref(false)
 const connectionType = ref<ConnectionType | null>(null)
+const projects = useProjectStore()
+const moveOpen = ref(false)
+const moveTo = ref<string | undefined>()
+const moving = ref(false)
+const moveItems = computed(() => projects.projects.filter(p => p.id !== repo.value?.projectId).map(p => ({ label: p.name, value: p.id })))
+
+/** Moving = PUT with another projectId (409 when a runner name already exists there). */
+async function move() {
+  if (!repo.value || !moveTo.value) return
+  moving.value = true
+  try {
+    const r = repo.value
+    repo.value = await api.repositories.update(r.id, {
+      connectionId: r.connectionId, name: r.name, url: r.url, defaultBranch: r.defaultBranch, projectId: moveTo.value,
+    })
+    notify.success(`Moved ${r.name} to ${projects.nameOf(repo.value.projectId)}`, 'Its runners and builds moved with it.')
+    moveOpen.value = false
+    void projects.load()
+  } catch (e) {
+    notify.error(e, 'Could not move the repository')
+  } finally {
+    moving.value = false
+  }
+}
 
 /** per-file mapping choices, keyed by path */
 const picks = reactive<Record<string, { selected: boolean; name: string; entryTask: string }>>({})
@@ -142,6 +167,32 @@ onMounted(async () => {
     </template>
 
     <template #body>
+      <div v-if="repo" class="flex flex-wrap items-center gap-2 text-sm">
+        <span class="text-muted">Project</span>
+        <UBadge :label="projects.nameOf(repo.projectId)" icon="i-lucide-folder-kanban" color="primary" variant="subtle" />
+        <UButton
+          v-if="org.isAdmin && projects.projects.length > 1" icon="i-lucide-folder-input" label="Move to project…" size="xs"
+          color="neutral" variant="outline" @click="moveTo = undefined; moveOpen = true"
+        />
+        <span class="min-w-0 truncate font-mono text-xs text-muted sm:hidden" :title="repo.url">{{ repo.url }}</span>
+      </div>
+      <UModal v-model:open="moveOpen" title="Move to project" :description="repo ? `${repo.name} and its runners and builds move to the chosen project.` : undefined">
+        <template #body>
+          <UFormField label="Project">
+            <USelect v-model="moveTo" :items="moveItems" class="w-full" placeholder="Choose a project" />
+          </UFormField>
+          <p class="mt-3 text-xs text-muted">
+            Runners keep their names; the move fails if the target project already has a runner with the same name.
+            Runners then resolve environments, secrets and registries from the new project first.
+          </p>
+        </template>
+        <template #footer>
+          <div class="flex w-full justify-end gap-2">
+            <UButton color="neutral" variant="outline" label="Cancel" @click="moveOpen = false" />
+            <UButton icon="i-lucide-folder-input" label="Move" :loading="moving" :disabled="!moveTo" @click="move" />
+          </div>
+        </template>
+      </UModal>
       <UEmpty v-if="notFound" icon="i-lucide-search-x" title="Repository not found" description="It may belong to another organization or have been removed." :actions="[{ label: 'Repositories', to: '/repositories' }]" />
 
       <template v-else>

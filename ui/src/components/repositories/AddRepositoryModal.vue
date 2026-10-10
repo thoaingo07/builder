@@ -3,12 +3,18 @@ import { computed, reactive, ref, watch } from 'vue'
 import { api } from '@/api/client'
 import type { ConnectionDto, RemoteRepositoryDto, RepositoryDto } from '@/api/types'
 import { useNotify } from '@/composables/useNotify'
+import { useProjectStore } from '@/stores/project'
 
 const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{ created: [RepositoryDto] }>()
 const notify = useNotify()
 
 const NONE = 'none'
+const builder = useProjectStore()
+/** Builder project the repository goes into (not the Azure DevOps project below) */
+const builderProjectId = ref<string | null>(null)
+const projectModel = computed({ get: () => builderProjectId.value ?? undefined, set: (v: string | undefined) => { builderProjectId.value = v ?? null } })
+const builderProjectItems = computed(() => builder.projects.map(p => ({ label: p.name, value: p.id, icon: 'i-lucide-folder-kanban' })))
 const connections = ref<ConnectionDto[]>([])
 const s = reactive({ connectionId: NONE, project: '', url: '', name: '', defaultBranch: '' })
 const projects = ref<string[]>([])
@@ -19,10 +25,15 @@ const loading = reactive({ projects: false, repos: false, branches: false })
 const branchError = ref<string | null>(null)
 const saving = ref(false)
 
-const connection = computed(() => connections.value.find(c => c.id === s.connectionId) ?? null)
+/** a project sees its own connections plus the shared ones */
+const visibleConnections = computed(() => connections.value.filter(c => c.projectId === null || c.projectId === builderProjectId.value))
+const connection = computed(() => visibleConnections.value.find(c => c.id === s.connectionId) ?? null)
 const isAzure = computed(() => connection.value?.type === 'AzureDevOps')
 const connectionItems = computed(() => [
-  ...connections.value.map(c => ({ label: c.name, value: c.id, icon: c.type === 'AzureDevOps' ? 'i-lucide-cloud-cog' : 'i-lucide-git-fork' })),
+  ...visibleConnections.value.map(c => ({
+    label: c.projectId ? c.name : `${c.name} (shared)`, value: c.id,
+    icon: c.type === 'AzureDevOps' ? 'i-lucide-cloud-cog' : 'i-lucide-git-fork',
+  })),
   { label: 'None — public repository', value: NONE, icon: 'i-lucide-globe' },
 ])
 const repoItems = computed(() => remoteRepos.value.map(r => ({ label: r.name, value: r.url })))
@@ -32,14 +43,21 @@ const valid = computed(() => /^https?:\/\//i.test(s.url.trim()) || /^git@/.test(
 watch(open, async o => {
   if (!o) return
   Object.assign(s, { connectionId: NONE, project: '', url: '', name: '', defaultBranch: '' })
+  builderProjectId.value = builder.currentId ?? (builder.projects.length === 1 ? builder.projects[0].id : null)
   projects.value = []; remoteRepos.value = []; branches.value = []; pickedRepo.value = undefined; branchError.value = null
   try {
     // only git-capable connections (Azure and Registry ones issue registry/cloud tokens)
     connections.value = (await api.connections.list()).filter(c => c.type === 'AzureDevOps' || c.type === 'Git')
-    const first = connections.value.find(c => c.type === 'AzureDevOps') ?? connections.value[0]
-    if (first) s.connectionId = first.id
+    pickConnection()
   } catch (e) { notify.error(e, 'Could not load connections') }
 })
+
+function pickConnection() {
+  const first = visibleConnections.value.find(c => c.type === 'AzureDevOps') ?? visibleConnections.value[0]
+  s.connectionId = first?.id ?? NONE
+}
+// another Builder project may not see the chosen connection
+watch(builderProjectId, () => { if (s.connectionId !== NONE && !connection.value) pickConnection() })
 
 watch(() => s.connectionId, async () => {
   s.project = ''; projects.value = []; remoteRepos.value = []; pickedRepo.value = undefined
@@ -90,6 +108,8 @@ async function submit() {
     const repo = await api.repositories.create({
       connectionId: s.connectionId === NONE ? null : s.connectionId,
       url: s.url.trim(), name: s.name.trim() || null, defaultBranch: s.defaultBranch.trim() || null,
+      // with no projects the server creates "Default"; with one it is used
+      projectId: builderProjectId.value,
     })
     notify.success(`Added ${repo.name}`)
     open.value = false
@@ -106,12 +126,19 @@ async function submit() {
   <UModal v-model:open="open" title="Add repository" description="Builder reads runner files from .builder/runners/ in this repository." :ui="{ content: 'sm:max-w-xl' }">
     <template #body>
       <form id="add-repo" class="space-y-4" @submit.prevent="submit">
-        <UFormField label="Connection" :help="connections.length ? undefined : 'No connections yet — add one under Connections for private repositories.'">
+        <UFormField
+          v-if="builder.projects.length" label="Project" :required="builder.projects.length > 1"
+          help="The repository's runners and builds belong to this project."
+        >
+          <USelect v-model="projectModel" :items="builderProjectItems" class="w-full" placeholder="Choose a project" />
+        </UFormField>
+        <p v-else class="text-xs text-muted">No projects yet — Builder puts this repository in a new “Default” project.</p>
+        <UFormField label="Connection" :help="visibleConnections.length ? 'This project\'s connections and the shared ones.' : 'No connections for this project — add one under Connections for private repositories.'">
           <USelect v-model="s.connectionId" :items="connectionItems" class="w-full" />
         </UFormField>
 
         <template v-if="isAzure">
-          <UFormField label="Project">
+          <UFormField label="Azure DevOps project">
             <USelectMenu v-model="s.project" :items="projects" :loading="loading.projects" class="w-full" placeholder="Select a project" icon="i-lucide-folder" />
           </UFormField>
           <UFormField label="Repository">
@@ -143,7 +170,7 @@ async function submit() {
     <template #footer>
       <div class="flex w-full justify-end gap-2">
         <UButton color="neutral" variant="outline" label="Cancel" @click="open = false" />
-        <UButton type="submit" form="add-repo" label="Add repository" :loading="saving" :disabled="!valid" />
+        <UButton type="submit" form="add-repo" label="Add repository" :loading="saving" :disabled="!valid || (builder.projects.length > 1 && !builderProjectId)" />
       </div>
     </template>
   </UModal>

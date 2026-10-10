@@ -10,6 +10,11 @@ import { useNotify } from '@/composables/useNotify'
 import { useConfirm } from '@/composables/useConfirm'
 import { useHighlight } from '@/composables/useHighlight'
 import DataList from '@/components/DataList.vue'
+import ScopeBadge from '@/components/ScopeBadge.vue'
+import ScopeSelect from '@/components/ScopeSelect.vue'
+import TestResult from '@/components/TestResult.vue'
+import { useProjectStore } from '@/stores/project'
+import { useScopedSections } from '@/composables/useScopedSections'
 
 const org = useOrgStore()
 const notify = useNotify()
@@ -24,8 +29,12 @@ const saving = ref(false)
 const testing = ref<string | null>(null)
 const s = reactive({
   name: '', type: 'AzureDevOps' as ConnectionType, authKind: 'Pat' as ConnectionAuthKind,
-  url: '', username: '', token: '', tenantId: '', clientId: '',
+  url: '', username: '', token: '', tenantId: '', clientId: '', projectId: null as string | null,
 })
+const project = useProjectStore()
+const { sections, overrides, defaultScope, showScope } = useScopedSections(connections)
+/** last Test outcome per connection, shown inline */
+const results = reactive<Record<string, { ok: boolean; message: string }>>({})
 
 const ARM_URL = 'https://management.azure.com'
 const typeItems = [
@@ -58,7 +67,7 @@ const columns: TableColumn<ConnectionDto>[] = [
 ]
 
 async function load() {
-  try { connections.value = await api.connections.list() } catch (e) { notify.error(e, 'Could not load connections') } finally { loading.value = false }
+  try { connections.value = await api.connections.list(project.query) } catch (e) { notify.error(e, 'Could not load connections') } finally { loading.value = false }
 }
 
 function openForm(c: ConnectionDto | null) {
@@ -67,7 +76,7 @@ function openForm(c: ConnectionDto | null) {
   Object.assign(s, {
     name: c?.name ?? '', type: c?.type ?? 'AzureDevOps', authKind: c?.authKind ?? 'Pat',
     url: c?.type === 'Azure' ? '' : (c?.url ?? ''), username: c?.username ?? '', token: '',
-    tenantId: c?.tenantId ?? '', clientId: c?.clientId ?? '',
+    tenantId: c?.tenantId ?? '', clientId: c?.clientId ?? '', projectId: c ? c.projectId : defaultScope.value,
   })
   formOpen.value = true
 }
@@ -103,6 +112,8 @@ async function submit() {
     authKind: sp ? 'ServicePrincipal' : 'Pat',
     tenantId: sp ? s.tenantId.trim() : null,
     clientId: sp ? s.clientId.trim() : null,
+    // always send the scope: omitting it on update would make the connection shared
+    projectId: s.projectId,
   }
   try {
     const saved = editing.value ? await api.connections.update(editing.value.id, input) : await api.connections.create(input)
@@ -117,11 +128,15 @@ async function test(c: ConnectionDto) {
   testing.value = c.id
   try {
     const r = await api.connections.test(c.id)
+    results[c.id] = r
     toast.add({
       title: r.ok ? `${c.name}: connection works` : `${c.name}: connection failed`, description: r.message,
       color: r.ok ? 'success' : 'error', icon: r.ok ? 'i-lucide-plug-zap' : 'i-lucide-unplug', duration: r.ok ? 5000 : 10000,
     })
-  } catch (e) { notify.error(e, `${c.name}: test failed`) } finally { testing.value = null }
+  } catch (e) {
+    results[c.id] = { ok: false, message: e instanceof Error ? e.message : 'Test failed' }
+    notify.error(e, `${c.name}: test failed`)
+  } finally { testing.value = null }
 }
 
 async function remove(c: ConnectionDto) {
@@ -152,18 +167,26 @@ onMounted(load)
         description="Connect an Azure DevOps organization with a personal access token, then add its repositories."
         :actions="org.isAdmin ? [{ label: 'New connection', icon: 'i-lucide-plus', onClick: () => openForm(null) }] : []"
       />
-      <UCard v-else :ui="{ body: 'p-0 sm:p-0' }">
-        <DataList :data="connections" :columns="columns" :loading="loading" :highlight-id="hl.id.value" :clickable="org.isAdmin" @select="openForm">
+      <template v-else>
+      <section v-for="sec in sections" :key="sec.key" class="space-y-2">
+        <div v-if="sec.title" class="flex flex-wrap items-baseline gap-x-2">
+          <h2 class="font-semibold text-highlighted">{{ sec.title }}</h2>
+          <span class="text-xs text-muted">{{ sec.hint }}</span>
+        </div>
+      <UCard :ui="{ body: 'p-0 sm:p-0' }">
+        <DataList :empty="sec.key === 'project' ? 'No connections in this project yet' : sec.key === 'shared' ? 'No shared connections' : 'No connections'" :data="sec.items" :columns="columns" :loading="loading" :highlight-id="hl.id.value" :clickable="org.isAdmin" @select="openForm">
           <template #card="{ item: c }">
             <div class="flex items-start gap-2">
               <div class="min-w-0 flex-1 space-y-1">
                 <div class="flex flex-wrap items-center gap-1.5">
                   <span class="font-medium text-highlighted">{{ c.name }}</span>
+                  <ScopeBadge v-if="showScope || overrides(c)" :project-id="c.projectId" :scope="showScope" :overrides="overrides(c)" />
                   <UBadge :label="typeLabel(c.type)" color="neutral" variant="subtle" size="sm" :icon="typeIcon(c.type)" />
                   <UBadge v-if="c.authKind === 'ServicePrincipal'" label="Service principal" icon="i-lucide-shield-check" color="primary" variant="subtle" size="sm" />
                   <UBadge v-else-if="c.hasToken" :label="c.type === 'Registry' ? 'Token' : 'PAT'" icon="i-lucide-key-round" color="neutral" variant="subtle" size="sm" />
                 </div>
                 <div class="truncate font-mono text-xs text-muted" :title="c.url">{{ c.type === 'Azure' ? (c.clientId ?? 'Azure Resource Manager') : c.url }}</div>
+                <TestResult :result="results[c.id]" :running="testing === c.id" />
               </div>
               <div class="flex shrink-0 items-center gap-1" @click.stop>
                 <UButton icon="i-lucide-plug-zap" label="Test" size="xs" color="neutral" variant="outline" :loading="testing === c.id" @click="test(c)" />
@@ -176,7 +199,13 @@ onMounted(load)
               </div>
             </div>
           </template>
-          <template #name-cell="{ row }"><span class="font-medium text-highlighted">{{ row.original.name }}</span></template>
+          <template #name-cell="{ row }">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span class="font-medium text-highlighted">{{ row.original.name }}</span>
+              <ScopeBadge v-if="showScope || overrides(row.original)" :project-id="row.original.projectId" :scope="showScope" :overrides="overrides(row.original)" />
+            </div>
+            <TestResult :result="results[row.original.id]" :running="testing === row.original.id" class="max-w-64" />
+          </template>
           <template #type-cell="{ row }">
             <UBadge :label="typeLabel(row.original.type)" color="neutral" variant="subtle" size="sm" :icon="typeIcon(row.original.type)" />
           </template>
@@ -202,11 +231,14 @@ onMounted(load)
           </template>
         </DataList>
       </UCard>
+      </section>
+      </template>
 
       <UModal v-model:open="formOpen" :title="editing ? `Edit ${editing.name}` : 'New connection'" :ui="{ content: 'sm:max-w-xl' }">
         <template #body>
           <UForm id="conn-form" :state="s" :validate="validate" class="space-y-4" @submit="submit">
             <UFormField label="Type" name="type"><USelect v-model="s.type" :items="typeItems" class="w-full" /></UFormField>
+            <ScopeSelect v-model="s.projectId" />
             <UFormField label="Name" name="name" required><UInput v-model="s.name" class="w-full" :placeholder="isArm ? 'azure-prod' : isAzure ? 'contoso' : isRegistry ? 'docker-hub' : 'github'" /></UFormField>
             <UFormField
               v-if="!isArm" :label="isAzure ? 'Organization URL' : isRegistry ? 'Registry host' : 'Host URL'" name="url" required

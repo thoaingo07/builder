@@ -6,11 +6,14 @@ import { useAuthStore } from '@/stores/auth'
 import { useLiveStore } from '@/stores/live'
 import { useOrgStore } from '@/stores/org'
 import OrgSwitcher from '@/components/org/OrgSwitcher.vue'
+import ProjectSwitcher from '@/components/org/ProjectSwitcher.vue'
+import { useProjectStore } from '@/stores/project'
 import ChangePasswordModal from '@/components/ChangePasswordModal.vue'
 
 const auth = useAuthStore()
 const live = useLiveStore()
 const org = useOrgStore()
+const project = useProjectStore()
 const router = useRouter()
 const overlay = useOverlay()
 const changePassword = overlay.create(ChangePasswordModal)
@@ -30,6 +33,7 @@ const nav = computed<NavigationMenuItem[][]>(() => [
     { label: 'Deployments', icon: 'i-lucide-rocket', to: '/deployments' },
   ],
   [
+    { label: 'Projects', icon: 'i-lucide-folder-kanban', to: '/projects' },
     { label: 'Settings', icon: 'i-lucide-settings', to: '/settings' },
     ...(org.isAdmin ? [{ label: 'Cleanup', icon: 'i-lucide-brush-cleaning', to: '/cleanup' }] : []),
   ],
@@ -64,6 +68,7 @@ async function logout() {
       </template>
 
       <template #default="{ collapsed }">
+        <ProjectSwitcher :collapsed="collapsed" />
         <UNavigationMenu :collapsed="collapsed" :items="nav[0]" orientation="vertical" tooltip />
         <USeparator />
         <UNavigationMenu :collapsed="collapsed" :items="nav[1]" orientation="vertical" tooltip />
@@ -90,7 +95,7 @@ async function logout() {
       </template>
     </UDashboardSidebar>
 
-    <!-- keyed by organization: switching remounts the page, which reloads its data -->
-    <RouterView :key="org.currentId ?? 'none'" />
+    <!-- keyed by organization + project: switching remounts the page, which reloads its data -->
+    <RouterView :key="`${org.currentId ?? 'none'}:${project.currentId ?? 'all'}`" />
   </UDashboardGroup>
 </template>

@@ -11,6 +11,10 @@ import { useNotify } from '@/composables/useNotify'
 import { useConfirm } from '@/composables/useConfirm'
 import { useHighlight } from '@/composables/useHighlight'
 import DataList from '@/components/DataList.vue'
+import ScopeBadge from '@/components/ScopeBadge.vue'
+import ScopeSelect from '@/components/ScopeSelect.vue'
+import { useProjectStore } from '@/stores/project'
+import { useScopedSections } from '@/composables/useScopedSections'
 
 const org = useOrgStore()
 const notify = useNotify()
@@ -19,11 +23,13 @@ const confirm = useConfirm()
 const NAME = /^[A-Z][A-Z0-9_]*$/
 const secrets = ref<SecretDto[]>([])
 const hl = useHighlight()
+const project = useProjectStore()
+const { sections, overrides, defaultScope, showScope } = useScopedSections(secrets)
 const loading = ref(true)
 const formOpen = ref(false)
 const editing = ref<SecretDto | null>(null)
 const saving = ref(false)
-const s = reactive({ name: '', value: '', description: '' })
+const s = reactive({ name: '', value: '', description: '', projectId: null as string | null })
 
 const columns: TableColumn<SecretDto>[] = [
   { accessorKey: 'name', header: 'Name' },
@@ -33,27 +39,29 @@ const columns: TableColumn<SecretDto>[] = [
 ]
 
 async function load() {
-  try { secrets.value = await api.secrets.list() } catch (e) { notify.error(e, 'Could not load secrets') } finally { loading.value = false }
+  try { secrets.value = await api.secrets.list(project.query) } catch (e) { notify.error(e, 'Could not load secrets') } finally { loading.value = false }
 }
 
 function openForm(x: SecretDto | null) {
   if (!org.isAdmin) return
   editing.value = x
-  Object.assign(s, { name: x?.name ?? '', value: '', description: x?.description ?? '' })
+  Object.assign(s, { name: x?.name ?? '', value: '', description: x?.description ?? '', projectId: x ? x.projectId : defaultScope.value })
   formOpen.value = true
 }
 
 function validate(v: typeof s): FormError[] {
   const errors: FormError[] = []
   if (!NAME.test(v.name)) errors.push({ name: 'name', message: 'Upper case letters, digits and _ ; must start with a letter' })
-  else if (secrets.value.some(x => x.name === v.name && x.id !== editing.value?.id)) errors.push({ name: 'name', message: 'A secret with this name exists' })
+  // the same name may exist once per scope (a project secret overrides a shared one)
+  else if (secrets.value.some(x => x.name === v.name && x.projectId === v.projectId && x.id !== editing.value?.id)) errors.push({ name: 'name', message: 'A secret with this name exists in this scope' })
   if (!editing.value && !v.value) errors.push({ name: 'value', message: 'Required' })
   return errors
 }
 
 async function submit() {
   saving.value = true
-  const input = { name: s.name, value: s.value ? s.value : null, description: s.description.trim() || null }
+  // always send the scope: omitting projectId on update would make the secret shared
+  const input = { name: s.name, value: s.value ? s.value : null, description: s.description.trim() || null, projectId: s.projectId }
   try {
     const saved = editing.value ? await api.secrets.update(editing.value.id, input) : await api.secrets.create(input)
     secrets.value = upsert(secrets.value, saved, false)
@@ -99,12 +107,19 @@ onMounted(load)
         :description="org.isAdmin ? 'Add credentials your runners need, such as registry passwords or API keys.' : 'An admin can add secrets for this organization.'"
         :actions="org.isAdmin ? [{ label: 'New secret', icon: 'i-lucide-plus', onClick: () => openForm(null) }] : []"
       />
-      <UCard v-else :ui="{ body: 'p-0 sm:p-0' }">
-        <DataList :data="secrets" :columns="columns" :loading="loading" :highlight-id="hl.id.value" :clickable="org.isAdmin" @select="openForm">
+      <template v-else>
+      <section v-for="sec in sections" :key="sec.key" class="space-y-2">
+        <div v-if="sec.title" class="flex flex-wrap items-baseline gap-x-2">
+          <h2 class="font-semibold text-highlighted">{{ sec.title }}</h2>
+          <span class="text-xs text-muted">{{ sec.hint }}</span>
+        </div>
+      <UCard :ui="{ body: 'p-0 sm:p-0' }">
+        <DataList :empty="sec.key === 'project' ? 'No secrets in this project yet' : sec.key === 'shared' ? 'No shared secrets' : 'No secrets'" :data="sec.items" :columns="columns" :loading="loading" :highlight-id="hl.id.value" :clickable="org.isAdmin" @select="openForm">
           <template #card="{ item: x }">
             <div class="flex items-start gap-2">
               <div class="min-w-0 flex-1">
                 <div class="truncate font-mono font-medium text-highlighted">{{ x.name }}</div>
+                <ScopeBadge v-if="showScope || overrides(x)" :project-id="x.projectId" :scope="showScope" :overrides="overrides(x)" class="my-0.5" />
                 <div v-if="x.description" class="truncate text-sm">{{ x.description }}</div>
                 <div class="text-xs text-muted">{{ dateTime(x.updatedAt) }} · {{ x.updatedBy }}</div>
               </div>
@@ -116,7 +131,12 @@ onMounted(load)
               </UDropdownMenu>
             </div>
           </template>
-          <template #name-cell="{ row }"><span class="font-mono font-medium text-highlighted">{{ row.original.name }}</span></template>
+          <template #name-cell="{ row }">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span class="font-mono font-medium text-highlighted">{{ row.original.name }}</span>
+              <ScopeBadge v-if="showScope || overrides(row.original)" :project-id="row.original.projectId" :scope="showScope" :overrides="overrides(row.original)" />
+            </div>
+          </template>
           <template #description-cell="{ row }"><span class="text-sm" :class="row.original.description ? '' : 'text-dimmed'">{{ row.original.description || '—' }}</span></template>
           <template #updated-cell="{ row }"><span class="text-xs text-muted">{{ dateTime(row.original.updatedAt) }} · {{ row.original.updatedBy }}</span></template>
           <template #actions-cell="{ row }">
@@ -127,6 +147,8 @@ onMounted(load)
           </template>
         </DataList>
       </UCard>
+      </section>
+      </template>
 
       <UModal v-model:open="formOpen" :title="editing ? `Edit ${editing.name}` : 'New secret'">
         <template #body>
@@ -143,6 +165,7 @@ onMounted(load)
             >
               <UTextarea v-model="s.value" :rows="3" autoresize class="w-full font-mono" autocomplete="off" spellcheck="false" :placeholder="editing ? '(unchanged)' : ''" />
             </UFormField>
+            <ScopeSelect v-model="s.projectId" />
             <UFormField label="Description" name="description">
               <UInput v-model="s.description" class="w-full" placeholder="What it is for" />
             </UFormField>

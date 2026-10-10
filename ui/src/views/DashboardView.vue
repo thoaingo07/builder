@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useProjectStore } from '@/stores/project'
 import NavAction from '@/components/NavAction.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '@/api/client'
@@ -9,11 +10,16 @@ import { useLiveStore } from '@/stores/live'
 import { useNotify } from '@/composables/useNotify'
 import { useNow } from '@/composables/useNow'
 import AgentCard from '@/components/AgentCard.vue'
+import ProjectFormModal from '@/components/org/ProjectFormModal.vue'
+import { useOrgStore } from '@/stores/org'
 import { useBuildActions } from '@/composables/useBuildActions'
 import BuildsTable from '@/components/BuildsTable.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 
 const live = useLiveStore()
+const project = useProjectStore()
+const org = useOrgStore()
+const projectFormOpen = ref(false)
 const notify = useNotify()
 const now = useNow(5000)
 const actions = useBuildActions()
@@ -42,7 +48,7 @@ const tiles = computed(() => [
 
 async function load(initial = false) {
   try {
-    const d = await api.dashboard()
+    const d = await api.dashboard(project.query)
     stats.value = d.last24h
     activeBuilds.value = d.activeBuilds
     recentBuilds.value = d.recentBuilds
@@ -90,6 +96,15 @@ onBeforeUnmount(() => offs.forEach(f => f()))
     </template>
 
     <template #body>
+      <UAlert
+        v-if="project.loaded && !project.projects.length" color="primary" variant="subtle" icon="i-lucide-folder-kanban"
+        title="Create your first project"
+        :description="org.isAdmin
+          ? 'Projects group repositories and runners, with their own connections, environments and secrets. Start with one; you can add more later.'
+          : 'An admin can create the first project for this organization.'"
+        :actions="org.isAdmin ? [{ label: 'New project', icon: 'i-lucide-plus', onClick: () => { projectFormOpen = true } }] : []"
+      />
+      <ProjectFormModal v-model:open="projectFormOpen" :project="null" @saved="p => project.select(p.id)" />
       <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
         <UCard v-for="t in tiles" :key="t.label" :ui="{ body: 'sm:p-4 p-3' }">
           <div class="flex items-center gap-3">

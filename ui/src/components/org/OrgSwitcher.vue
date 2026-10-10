@@ -5,6 +5,7 @@ import type { DropdownMenuItem } from '@nuxt/ui'
 import type { OrgCreatedDto, OrgRole } from '@/api/types'
 import { useOrgStore } from '@/stores/org'
 import { useLiveStore } from '@/stores/live'
+import { useProjectStore } from '@/stores/project'
 import CreateOrgModal from './CreateOrgModal.vue'
 import AgentTokenModal from './AgentTokenModal.vue'
 
@@ -12,6 +13,7 @@ defineProps<{ collapsed?: boolean }>()
 
 const org = useOrgStore()
 const live = useLiveStore()
+const project = useProjectStore()
 const router = useRouter()
 const createOpen = ref(false)
 const tokenOpen = ref(false)
@@ -24,6 +26,7 @@ async function switchTo(id: string) {
   if (id === org.currentId) return
   org.select(id)
   await live.joinOrg(id)
+  await project.load()
   // detail pages belong to the previous organization
   if (Object.keys(router.currentRoute.value.params).length) await router.push('/')
 }
@@ -46,6 +49,7 @@ async function onCreated(c: OrgCreatedDto) {
   created.value = c
   tokenOpen.value = true
   await live.joinOrg(c.org.id)
+  await project.load()
   await router.push('/')
 }
 </script>
