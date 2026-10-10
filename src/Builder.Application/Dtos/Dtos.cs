@@ -71,14 +71,16 @@ public sealed record EnvironmentDto(
     Guid Id, string Name, EnvironmentType Type, bool RequiresApproval, List<string> Approvers, List<string> AgentLabels,
     string? Host, int Port, string? Username, bool HasPrivateKey,
     bool HasKubeconfig, string? AksTenantId, string? AksClientId, bool HasAksClientSecret,
-    string? AksSubscriptionId, string? AksResourceGroup, string? AksClusterName, bool AksAdmin, Guid? ProjectId);
+    string? AksSubscriptionId, string? AksResourceGroup, string? AksClusterName, bool AksAdmin, Guid? ProjectId,
+    bool HasPassword);
 
 /// <summary>ProjectId null: shared by the whole organization.</summary>
 public sealed record EnvironmentInput(
     string Name, EnvironmentType Type, bool RequiresApproval, List<string>? Approvers, List<string>? AgentLabels,
     string? Host, int? Port, string? Username, string? PrivateKey,
     string? Kubeconfig, string? AksTenantId, string? AksClientId, string? AksClientSecret,
-    string? AksSubscriptionId, string? AksResourceGroup, string? AksClusterName, bool AksAdmin, Guid? ProjectId = null);
+    string? AksSubscriptionId, string? AksResourceGroup, string? AksClusterName, bool AksAdmin, Guid? ProjectId = null,
+    string? Password = null);
 
 public sealed record DeploymentDto(
     Guid Id, Guid EnvironmentId, string EnvironmentName, Guid PipelineId, string PipelineName, Guid BuildId,

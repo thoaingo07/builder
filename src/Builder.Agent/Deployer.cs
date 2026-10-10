@@ -10,7 +10,10 @@ public sealed class Deployer(DeployTarget target, DeploySecrets secrets, string 
 {
     private string? _keyFile;
     private string? _kubeconfig;
+    private string? _askPass;
     private readonly Dictionary<string, string> _env = new();
+    /// <summary>Environment for ssh/scp: with a password, OpenSSH asks <see cref="_askPass"/> for it (no terminal needed).</summary>
+    private readonly Dictionary<string, string> _sshEnv = new();
 
     public IReadOnlyDictionary<string, string> Environment => _env;
 
@@ -33,6 +36,18 @@ public sealed class Deployer(DeployTarget target, DeploySecrets secrets, string 
                 await File.WriteAllTextAsync(_keyFile, key.ReplaceLineEndings("\n").TrimEnd() + "\n", ct);
                 if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(_keyFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
                 _env["DEPLOY_SSH_KEY"] = _keyFile;
+            }
+            else if (secrets.Password is { } password)
+            {
+                // OpenSSH (8.4+) runs SSH_ASKPASS for the password when SSH_ASKPASS_REQUIRE=force; the script reads it
+                // from the environment, so the password is never in a file or on a command line
+                _askPass = Path.Combine(tempDir, $"askpass-{Guid.NewGuid():N}.sh");
+                await File.WriteAllTextAsync(_askPass, "#!/bin/sh\nprintf '%s\\n' \"$BUILDER_SSH_PASSWORD\"\n", ct);
+                if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(_askPass, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                _sshEnv["SSH_ASKPASS"] = _askPass;
+                _sshEnv["SSH_ASKPASS_REQUIRE"] = "force";
+                _sshEnv["BUILDER_SSH_PASSWORD"] = password;
+                foreach (var (k, v) in _sshEnv) _env[k] = v;   // $DEPLOY_SSH in the task's own commands works the same way
             }
             _env["DEPLOY_SSH"] = "ssh " + string.Join(' ', SshOptions().Select(Quote)) + $" {Destination}";
             return;
@@ -104,7 +119,7 @@ public sealed class Deployer(DeployTarget target, DeploySecrets secrets, string 
             var code = await Ssh($"mkdir -p {remoteDir}", log, ct);
             if (code != 0) return code;
             code = await ProcessRunner.RunAsync("scp", [.. ScpOptions(), compose, $"{Destination}:{remoteDir}/docker-compose.yml"],
-                sourceDir, null, log.Write, ct);
+                sourceDir, _sshEnv, log.Write, ct);
             if (code != 0) return code;
             return await Ssh($"{RemoteCompose}cd {remoteDir} && ($C -p {project} -f docker-compose.yml pull || echo 'pull failed - using local images') && $C -p {project} -f docker-compose.yml up -d", log, ct);
         }
@@ -128,7 +143,7 @@ public sealed class Deployer(DeployTarget target, DeploySecrets secrets, string 
         if (target.Container is { } container)
         {
             var lines = new List<string>();
-            await PrepareAsync(new JobLog(_ => Task.CompletedTask, [secrets.PrivateKey]), ct);
+            await PrepareAsync(new JobLog(_ => Task.CompletedTask, [secrets.PrivateKey, secrets.Password]), ct);
             try
             {
                 var (code, _) = await RunContainerScriptAsync(action == DeploymentAction.Rollback ? "rollback" : "destroy", container,
@@ -169,7 +184,7 @@ public sealed class Deployer(DeployTarget target, DeploySecrets secrets, string 
         using var stream = typeof(Deployer).Assembly.GetManifestResourceStream("deploy-container.sh")!;
         var script = preamble + await new StreamReader(stream).ReadToEndAsync(ct);
         string? result = null;
-        var code = await ProcessRunner.RunAsync("ssh", [.. SshOptions(), Destination, "bash -s"], tempDir, null,
+        var code = await ProcessRunner.RunAsync("ssh", [.. SshOptions(), Destination, "bash -s"], tempDir, _sshEnv,
             (stream, line) =>
             {
                 if (line.StartsWith("BUILDER-RESULT ", StringComparison.Ordinal)) result = line;
@@ -183,14 +198,14 @@ public sealed class Deployer(DeployTarget target, DeploySecrets secrets, string 
     {
         var lines = new List<string>();
         void Collect(LogStream _, string l) => lines.Add(l);
-        var log = new JobLog(_ => Task.CompletedTask, [secrets.PrivateKey, secrets.AksClientSecret]);
+        var log = new JobLog(_ => Task.CompletedTask, [secrets.PrivateKey, secrets.AksClientSecret, secrets.Password]);
         try
         {
             await PrepareAsync(log, ct);
             if (target.Type == DeployTargetType.SshDocker)
             {
                 const string probe = "echo \"user=$(id -un)\"; docker version --format 'docker={{.Server.Version}}' 2>&1 | tail -1";
-                var code = await ProcessRunner.RunAsync("ssh", [.. SshOptions(), Destination, probe], tempDir, null, Collect, ct);
+                var code = await ProcessRunner.RunAsync("ssh", [.. SshOptions(), Destination, probe], tempDir, _sshEnv, Collect, ct);
                 if (code != 0) return new(false, $"SSH to {Destination}:{target.Port} failed: {Last(lines)}");
                 var user = lines.FirstOrDefault(l => l.StartsWith("user="))?[5..];
                 var docker = lines.LastOrDefault(l => l.StartsWith("docker="))?[7..];
@@ -221,7 +236,7 @@ public sealed class Deployer(DeployTarget target, DeploySecrets secrets, string 
     public async Task<(bool Ok, string Output)> TeardownAsync(CancellationToken ct)
     {
         var lines = new List<string>();
-        var log = new JobLog(_ => Task.CompletedTask, [secrets.PrivateKey, secrets.AksClientSecret]);
+        var log = new JobLog(_ => Task.CompletedTask, [secrets.PrivateKey, secrets.AksClientSecret, secrets.Password]);
         void Collect(LogStream _, string l) => lines.Add(l);
         int code;
         await PrepareAsync(log, ct);
@@ -229,7 +244,7 @@ public sealed class Deployer(DeployTarget target, DeploySecrets secrets, string 
         {
             code = await ProcessRunner.RunAsync("ssh", [.. SshOptions(), Destination,
                 $"{RemoteCompose}cd builder/{target.Project} && $C -p {target.Project} -f docker-compose.yml down && cd && rm -rf builder/{target.Project}"],
-                tempDir, null, Collect, ct);
+                tempDir, _sshEnv, Collect, ct);
         }
         else
         {
@@ -243,24 +258,27 @@ public sealed class Deployer(DeployTarget target, DeploySecrets secrets, string 
 
     public void Cleanup()
     {
-        foreach (var f in new[] { _keyFile, _kubeconfig })
+        foreach (var f in new[] { _keyFile, _kubeconfig, _askPass })
             if (f is not null && File.Exists(f)) File.Delete(f);
     }
 
     private string Destination => $"{target.Username ?? "root"}@{target.Host}";
 
     private Task<int> Ssh(string command, JobLog log, CancellationToken ct) =>
-        ProcessRunner.RunAsync("ssh", [.. SshOptions(), Destination, command], tempDir, null, log.Write, ct);
+        ProcessRunner.RunAsync("ssh", [.. SshOptions(), Destination, command], tempDir, _sshEnv, log.Write, ct);
 
     private List<string> CommonOptions()
     {
-        var o = new List<string>
-        {
-            "-o", "BatchMode=yes",
+        // BatchMode would turn password authentication off; with a password, allow exactly one attempt
+        List<string> o = _askPass is null
+            ? ["-o", "BatchMode=yes"]
+            : ["-o", "PreferredAuthentications=password,keyboard-interactive", "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=1"];
+        o.AddRange(
+        [
             "-o", "StrictHostKeyChecking=accept-new",
             "-o", $"UserKnownHostsFile={Path.Combine(workRoot, "known_hosts")}",
             "-o", "ConnectTimeout=20",
-        };
+        ]);
         if (_keyFile is not null) o.AddRange(["-i", _keyFile, "-o", "IdentitiesOnly=yes"]);
         return o;
     }

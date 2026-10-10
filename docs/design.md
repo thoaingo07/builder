@@ -173,7 +173,9 @@ tasks:
 
 Builder env vars available to every command: `BUILDER_BUILD_ID`, `BUILDER_BUILD_NUMBER`,
 `BUILDER_COMMIT`, `BUILDER_BRANCH`, `BUILDER_PIPELINE`, plus deploy vars
-(`DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` (file path), `KUBECONFIG`).
+(`DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` (file path), `KUBECONFIG`). An SSH environment logs in with a
+private key or a password; with a password the agent sets `SSH_ASKPASS` (+ `SSH_ASKPASS_REQUIRE=force`) to a
+temporary script that prints it from the job's environment, so `$DEPLOY_SSH` needs no terminal (OpenSSH 8.4+).
 
 ## Environments (deploy targets)
 

@@ -147,15 +147,17 @@ type AgentDto = {
   metrics: AgentMetricsDto|null; runningJobs: { buildId; buildNumber; pipelineName; jobId; taskName }[]  // this org's only
 }
 
-type EnvironmentType = 'SshDocker'|'Kubernetes'   // SshDocker = SSH + compose on a Docker or Podman host
+type EnvironmentType = 'SshDocker'|'Kubernetes'   // SshDocker = a server reached over SSH that already has Docker (or Podman)
 type EnvironmentDto = {
   id; name; type: EnvironmentType; requiresApproval: boolean; approvers: string[]; agentLabels: string[]
   host: string|null; port: number; username: string|null; hasPrivateKey: boolean
   hasKubeconfig: boolean; aksTenantId; aksClientId; hasAksClientSecret: boolean
   aksSubscriptionId; aksResourceGroup; aksClusterName; aksAdmin: boolean
+  projectId: string|null; hasPassword: boolean   // SSH with a password instead of a private key
 }
-type EnvironmentInput = Omit<EnvironmentDto,'id'|'hasPrivateKey'|'hasKubeconfig'|'hasAksClientSecret'>
-  & { privateKey?: string|null; kubeconfig?: string|null; aksClientSecret?: string|null }
+type EnvironmentInput = Omit<EnvironmentDto,'id'|'hasPrivateKey'|'hasPassword'|'hasKubeconfig'|'hasAksClientSecret'>
+  & { privateKey?: string|null; password?: string|null; kubeconfig?: string|null; aksClientSecret?: string|null }
+  // SSH uses a key or a password: sending one replaces the other; sending neither keeps what is stored
 
 type DeploymentStatus = 'Deploying'|'Active'|'Failed'|'Destroying'|'Destroyed'|'Superseded'|'RollingBack'|'RolledBack'
 type DeploymentDto = {

@@ -31,7 +31,7 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
             var credentials = await server.GetJobCredentialsAsync(job.JobId);
             log.AddSecrets([credentials.GitAuthorization ?? "", credentials.AzureDevOpsToken ?? "",
                 .. credentials.Registries.Select(r => r.Password),
-                credentials.Deploy?.PrivateKey ?? "", credentials.Deploy?.Kubeconfig ?? "", credentials.Deploy?.AksClientSecret ?? ""]);
+                credentials.Deploy?.PrivateKey ?? "", credentials.Deploy?.Password ?? "", credentials.Deploy?.Kubeconfig ?? "", credentials.Deploy?.AksClientSecret ?? ""]);
             if (job.Deploy is { } target)
                 deployer = new Deployer(target, credentials.Deploy ?? new DeploySecrets(null, null, null), Path.Combine(sandbox.Root, "deploy"), options.WorkRoot);
             if (credentials.ExpiresAt is { } expires)

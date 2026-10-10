@@ -78,7 +78,7 @@ public sealed record JobCredentials(
     DeploySecrets? Deploy = null);
 
 /// <summary>An environment's secrets, fetched by the agent that deploys to it (or tears it down), never pushed.</summary>
-public sealed record DeploySecrets(string? PrivateKey, string? Kubeconfig, string? AksClientSecret);
+public sealed record DeploySecrets(string? PrivateKey, string? Kubeconfig, string? AksClientSecret, string? Password = null);
 
 public sealed record ArtifactRef(Guid ArtifactId, string Name, string DownloadPath);
 

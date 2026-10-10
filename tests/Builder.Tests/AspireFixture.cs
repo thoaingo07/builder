@@ -18,6 +18,9 @@ public sealed class AspireFixture : IAsyncLifetime
     /// <summary>Private key the test VPS accepts (OpenSSH format).</summary>
     public string VpsPrivateKey { get; private set; } = "";
 
+    /// <summary>Password the test VPS also accepts for root (with a quote and a space, to test quoting).</summary>
+    public string VpsPassword { get; } = "pw '" + Guid.NewGuid().ToString("N")[..12] + " $x";
+
     public async Task InitializeAsync()
     {
         var keyDir = Directory.CreateTempSubdirectory("builder-vps-key-").FullName;
@@ -29,7 +32,7 @@ public sealed class AspireFixture : IAsyncLifetime
         Directory.Delete(keyDir, true);
 
         var builder = await DistributedApplicationTestingBuilder.CreateAsync<Projects.Builder_AppHost>(
-            ["--Builder:Profile=backend", "--Builder:Ephemeral=true", $"--Builder:TestVpsAuthorizedKey={publicKey}"]);
+            ["--Builder:Profile=backend", "--Builder:Ephemeral=true", $"--Builder:TestVpsAuthorizedKey={publicKey}", $"--Builder:TestVpsPassword={VpsPassword}"]);
         builder.Services.AddLogging(l => l.SetMinimumLevel(LogLevel.Warning));
         builder.Services.ConfigureHttpClientDefaults(c => c.AddStandardResilienceHandler());
 
