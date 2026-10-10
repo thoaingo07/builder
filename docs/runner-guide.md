@@ -231,15 +231,16 @@ be added through an Azure DevOps connection.
 ### 5.8 `x-deploy`: deploy to an environment
 
 `environment` is the only required field. It names a deploy environment defined in Builder, in the runner's
-project or shared: an **SSH + Docker** host or a **Kubernetes** cluster. The job's commands run first; then
+project or shared: a **server reached over SSH** (key or password; Docker must already be installed there) or a
+**Kubernetes** cluster. The job's commands run first; then
 Builder's built-in deploy runs if one is configured. The environment's credentials reach the job as:
 
 | Variable | SSH + Docker | Kubernetes |
 |---|---|---|
 | `DEPLOY_ENVIRONMENT` | environment name | environment name |
 | `DEPLOY_HOST`, `DEPLOY_PORT`, `DEPLOY_USER` | the host | – |
-| `DEPLOY_SSH_KEY` | path of a temp private key | – |
-| `DEPLOY_SSH` | ready-made `ssh … user@host` command prefix | – |
+| `DEPLOY_SSH_KEY` | path of a temp private key (key login only) | – |
+| `DEPLOY_SSH` | ready-made `ssh … user@host` command prefix (works for key and password logins) | – |
 | `KUBECONFIG` | – | temp kubeconfig (also for AKS service principals) |
 | `DEPLOY_NAMESPACE`, `DEPLOY_PROJECT`, `DEPLOY_URL` | when set in `x-deploy` | when set |
 

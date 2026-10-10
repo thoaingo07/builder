@@ -158,9 +158,12 @@ export interface EnvironmentDto {
   aksSubscriptionId: string | null; aksResourceGroup: string | null; aksClusterName: string | null; aksAdmin: boolean
   /** null = shared by every project */
   projectId: Guid | null
+  /** SSH logs in with a stored password instead of a private key */
+  hasPassword: boolean
 }
-export type EnvironmentInput = Omit<EnvironmentDto, 'id' | 'hasPrivateKey' | 'hasKubeconfig' | 'hasAksClientSecret'> & {
-  privateKey?: string | null; kubeconfig?: string | null; aksClientSecret?: string | null
+export type EnvironmentInput = Omit<EnvironmentDto, 'id' | 'hasPrivateKey' | 'hasPassword' | 'hasKubeconfig' | 'hasAksClientSecret'> & {
+  /** a new key replaces a stored password and the other way round */
+  privateKey?: string | null; password?: string | null; kubeconfig?: string | null; aksClientSecret?: string | null
 }
 
 export type DeploymentStatus = 'Deploying' | 'Active' | 'Failed' | 'Destroying' | 'Destroyed' | 'Superseded' | 'RollingBack' | 'RolledBack'

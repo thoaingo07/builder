@@ -13,7 +13,7 @@ const notify = useNotify()
 
 const blank = () => ({
   name: '', type: 'SshDocker' as EnvironmentType, requiresApproval: false, approvers: [] as string[], agentLabels: [] as string[],
-  host: '', port: 22, username: '', privateKey: '',
+  host: '', port: 22, username: '', sshAuth: 'key' as 'key' | 'password', privateKey: '', password: '',
   k8sMode: 'kubeconfig' as 'kubeconfig' | 'aks', kubeconfig: '',
   aksTenantId: '', aksClientId: '', aksClientSecret: '', aksSubscriptionId: '', aksResourceGroup: '', aksClusterName: '', aksAdmin: false,
   projectId: null as string | null,
@@ -23,8 +23,12 @@ const saving = ref(false)
 const env = computed(() => props.environment)
 
 const typeItems = [
-  { label: 'VPS · SSH + Compose (Docker or Podman)', value: 'SshDocker', icon: 'i-lucide-server' },
+  { label: 'Server (SSH)', value: 'SshDocker', icon: 'i-lucide-server' },
   { label: 'Kubernetes / AKS', value: 'Kubernetes', icon: 'i-lucide-ship-wheel' },
+]
+const sshAuths = [
+  { label: 'Private key', value: 'key' },
+  { label: 'Password', value: 'password' },
 ]
 const k8sModes = [
   { label: 'Kubeconfig', value: 'kubeconfig' },
@@ -39,7 +43,7 @@ watch(open, o => {
   if (!e) return
   Object.assign(s, {
     name: e.name, type: e.type, requiresApproval: e.requiresApproval, approvers: [...e.approvers], agentLabels: [...e.agentLabels],
-    host: e.host ?? '', port: e.port || 22, username: e.username ?? '',
+    host: e.host ?? '', port: e.port || 22, username: e.username ?? '', sshAuth: e.hasPassword ? 'password' : 'key',
     k8sMode: e.aksClusterName ? 'aks' : 'kubeconfig',
     aksTenantId: e.aksTenantId ?? '', aksClientId: e.aksClientId ?? '', aksSubscriptionId: e.aksSubscriptionId ?? '',
     aksResourceGroup: e.aksResourceGroup ?? '', aksClusterName: e.aksClusterName ?? '', aksAdmin: e.aksAdmin,
@@ -55,7 +59,8 @@ function validate(v: typeof s): FormError[] {
   if (v.type === 'SshDocker') {
     if (!v.host.trim()) errors.push({ name: 'host', message: 'Required' })
     if (!v.username.trim()) errors.push({ name: 'username', message: 'Required' })
-    if (!v.privateKey.trim() && !env.value?.hasPrivateKey) errors.push({ name: 'privateKey', message: 'Required' })
+    if (v.sshAuth === 'key' && !v.privateKey.trim() && !env.value?.hasPrivateKey) errors.push({ name: 'privateKey', message: 'Required' })
+    if (v.sshAuth === 'password' && !v.password && !env.value?.hasPassword) errors.push({ name: 'password', message: 'Required' })
   } else if (v.k8sMode === 'kubeconfig') {
     if (!v.kubeconfig.trim() && !env.value?.hasKubeconfig) errors.push({ name: 'kubeconfig', message: 'Required' })
   } else {
@@ -75,7 +80,8 @@ async function submit() {
     name: s.name.trim(), type: s.type, requiresApproval: s.requiresApproval, approvers: s.approvers, agentLabels: s.agentLabels,
     host: s.type === 'SshDocker' ? orNull(s.host) : null, port: Number(s.port) || 22,
     username: s.type === 'SshDocker' ? orNull(s.username) : null,
-    privateKey: s.type === 'SshDocker' ? (s.privateKey.trim() ? s.privateKey : null) : null,
+    privateKey: s.type === 'SshDocker' && s.sshAuth === 'key' ? (s.privateKey.trim() ? s.privateKey : null) : null,
+    password: s.type === 'SshDocker' && s.sshAuth === 'password' ? (s.password ? s.password : null) : null,
     kubeconfig: s.type === 'Kubernetes' && !aks ? (s.kubeconfig.trim() ? s.kubeconfig : null) : null,
     aksTenantId: aks ? orNull(s.aksTenantId) : null, aksClientId: aks ? orNull(s.aksClientId) : null,
     aksClientSecret: aks ? orNull(s.aksClientSecret) : null, aksSubscriptionId: aks ? orNull(s.aksSubscriptionId) : null,
@@ -123,8 +129,13 @@ async function submit() {
               <UInput v-model="s.username" class="w-full font-mono" placeholder="deploy" />
             </UFormField>
           </div>
-          <UFormField label="Private key" name="privateKey" :required="!env?.hasPrivateKey" :help="secretHint(env?.hasPrivateKey) ?? 'OpenSSH private key; the user needs docker access on the host.'">
+          <p class="text-xs text-muted">Builder only logs in over SSH and runs <code>docker</code> there; nothing is installed. The user needs docker access on the server (e.g. in the <code>docker</code> group).</p>
+          <URadioGroup v-model="s.sshAuth" :items="sshAuths" orientation="horizontal" />
+          <UFormField v-if="s.sshAuth === 'key'" label="Private key" name="privateKey" :required="!env?.hasPrivateKey" :help="secretHint(env?.hasPrivateKey) ?? (env?.hasPassword ? 'Saving a key replaces the stored password.' : 'OpenSSH private key.')">
             <UTextarea v-model="s.privateKey" :rows="4" class="w-full font-mono text-xs" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" autocomplete="off" spellcheck="false" />
+          </UFormField>
+          <UFormField v-else label="Password" name="password" :required="!env?.hasPassword" :help="secretHint(env?.hasPassword) ?? (env?.hasPrivateKey ? 'Saving a password replaces the stored key.' : 'The server must allow password logins (sshd PasswordAuthentication yes).')">
+            <UInput v-model="s.password" type="password" class="w-full font-mono" autocomplete="new-password" />
           </UFormField>
         </template>
 

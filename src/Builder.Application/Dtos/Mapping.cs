@@ -43,7 +43,7 @@ public static class Mapping
     public static EnvironmentDto ToDto(this DeployEnvironment e) => new(
         e.Id, e.Name, e.Type, e.RequiresApproval, e.Approvers, e.AgentLabels, e.Host, e.Port, e.Username,
         e.PrivateKeyProtected is not null, e.KubeconfigProtected is not null, e.AksTenantId, e.AksClientId,
-        e.AksClientSecretProtected is not null, e.AksSubscriptionId, e.AksResourceGroup, e.AksClusterName, e.AksAdmin, e.ProjectId);
+        e.AksClientSecretProtected is not null, e.AksSubscriptionId, e.AksResourceGroup, e.AksClusterName, e.AksAdmin, e.ProjectId, e.PasswordProtected is not null);
 
     public static DeploymentDto ToDto(this Deployment d, string pipelineName) => new(
         d.Id, d.EnvironmentId, d.EnvironmentName, d.PipelineId, pipelineName, d.BuildId, d.BuildNumber, d.JobId,

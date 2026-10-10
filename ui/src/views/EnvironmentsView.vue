@@ -94,7 +94,7 @@ onMounted(load)
     <template #body>
       <UEmpty
         v-if="!loading && !envs.length" icon="i-lucide-cloud" title="No environments"
-        description="Add a VPS (SSH + Docker) or a Kubernetes/AKS cluster, then reference it from a task's x-deploy."
+        description="Add a server reached over SSH (with Docker already installed) or a Kubernetes/AKS cluster, then reference it from a task's x-deploy."
         :actions="org.isAdmin ? [{ label: 'New environment', icon: 'i-lucide-plus', onClick: create }] : []"
       />
       <template v-else>
@@ -113,7 +113,7 @@ onMounted(load)
                   <span class="font-mono font-medium text-highlighted">{{ e.name }}</span>
                   <ScopeBadge v-if="showScope || overrides(e)" :project-id="e.projectId" :scope="showScope" :overrides="overrides(e)" />
                 </div>
-                <div class="truncate font-mono text-xs text-muted" :title="target(e)">{{ e.type === 'SshDocker' ? 'SSH + Compose' : 'Kubernetes' }} · {{ target(e) }}</div>
+                <div class="truncate font-mono text-xs text-muted" :title="target(e)">{{ e.type === 'SshDocker' ? (e.hasPassword ? 'SSH (password)' : 'SSH (key)') : 'Kubernetes' }} · {{ target(e) }}</div>
                 <TestResult :result="results[e.id]" :running="testing.has(e.id)" />
                 <div v-if="e.requiresApproval || e.agentLabels.length" class="flex flex-wrap gap-1">
                   <UBadge v-if="e.requiresApproval" icon="i-lucide-lock" color="warning" variant="subtle" size="sm" label="Approval" />
@@ -143,7 +143,7 @@ onMounted(load)
             <div class="flex items-center gap-2">
               <UIcon :name="row.original.type === 'SshDocker' ? 'i-lucide-server' : 'i-lucide-ship-wheel'" class="text-muted" />
               <div>
-                <div class="text-sm">{{ row.original.type === 'SshDocker' ? 'SSH + Docker' : 'Kubernetes' }}</div>
+                <div class="text-sm">{{ row.original.type === 'SshDocker' ? (row.original.hasPassword ? 'SSH (password)' : 'SSH (key)') : 'Kubernetes' }}</div>
                 <div class="font-mono text-xs text-muted">{{ target(row.original) }}</div>
               </div>
             </div>

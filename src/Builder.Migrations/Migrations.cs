@@ -17,3 +17,4 @@ namespace Builder.Migrations;
 [Migration(8, "triggers")] public sealed class M000008 : SqlFileMigration;
 [Migration(9, "container_deployments")] public sealed class M000009 : SqlFileMigration;
 [Migration(10, "projects")] public sealed class M000010 : SqlFileMigration;
+[Migration(11, "ssh_password")] public sealed class M000011 : SqlFileMigration;

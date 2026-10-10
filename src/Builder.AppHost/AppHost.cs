@@ -75,6 +75,7 @@ if (builder.Configuration["Builder:TestVpsAuthorizedKey"] is { Length: > 0 } aut
 {
     builder.AddDockerfile("vps", "../../deploy/test-vps", "Containerfile")
         .WithEnvironment("AUTHORIZED_KEY", authorizedKey)
+        .WithEnvironment("ROOT_PASSWORD", builder.Configuration["Builder:TestVpsPassword"] ?? "")
         .WithBindMount(ContainerSocket(), "/var/run/docker.sock")
         .WithEndpoint(targetPort: 22, name: "ssh", scheme: "tcp");
 }

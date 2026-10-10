@@ -4,6 +4,13 @@ Living list of security decisions and open work. ✅ done · ⬜ open · ⚠️ 
 
 ## Decided for now
 
+- ⚠️ **SSH environments may log in with a password** (2026-10-10, asked for). Stored encrypted like keys and only
+  given to the agent running the job, test or teardown; the agent passes it through `SSH_ASKPASS` from the job's
+  environment (never a file or command line) and masks it in logs. Weaker than a key: the server must allow
+  `PasswordAuthentication`, so it is open to password guessing from anywhere that reaches its SSH port, and a
+  password is often reused elsewhere.
+  - Prefer a dedicated deploy user with a key; if a password is used, make it long and unique, and limit SSH
+    with a firewall / fail2ban.
 - ⚠️ **Container builds use the host's Podman socket** (2026-10-09). The agent container mounts the server's
   Podman (or Docker) socket so jobs can `docker build/run/push`. Whoever can use that socket controls the
   containers of that user: with **rootless Podman** (recommended) that is everything the daemon's user owns, with

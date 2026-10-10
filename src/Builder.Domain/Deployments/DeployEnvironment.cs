@@ -22,6 +22,8 @@ public sealed class DeployEnvironment : Projects.IProjectScoped
     public int Port { get; private set; } = 22;
     public string? Username { get; private set; }
     public string? PrivateKeyProtected { get; private set; }
+    /// <summary>SSH password (ciphertext); an environment uses a private key or a password, not both.</summary>
+    public string? PasswordProtected { get; private set; }
 
     // kubernetes
     public string? KubeconfigProtected { get; private set; }
@@ -62,13 +64,17 @@ public sealed class DeployEnvironment : Projects.IProjectScoped
         AgentLabels = agentLabels.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim().ToLowerInvariant()).ToList();
     }
 
-    public void SetSsh(string? host, int port, string? username, string? privateKeyProtected)
+    /// <summary>A new private key replaces the password and the other way round; null keeps what is stored.</summary>
+    public void SetSsh(string? host, int port, string? username, string? privateKeyProtected, string? passwordProtected = null)
     {
+        if (privateKeyProtected is not null && passwordProtected is not null)
+            throw new DomainException("Use a private key or a password for SSH, not both.");
         Type = EnvironmentType.SshDocker;
         Host = host;
         Port = port <= 0 ? 22 : port;
         Username = username;
-        if (privateKeyProtected is not null) PrivateKeyProtected = privateKeyProtected;
+        if (privateKeyProtected is not null) (PrivateKeyProtected, PasswordProtected) = (privateKeyProtected, null);
+        if (passwordProtected is not null) (PasswordProtected, PrivateKeyProtected) = (passwordProtected, null);
     }
 
     public void SetKubernetes(string? kubeconfigProtected, string? tenantId, string? clientId, string? clientSecretProtected,

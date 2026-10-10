@@ -82,7 +82,8 @@ public sealed class EnvironmentService(IAppDbContext db, IClock clock, ICurrentO
     {
         env.SetPolicy(i.RequiresApproval, i.Approvers ?? [], i.AgentLabels ?? []);
         if (i.Type == EnvironmentType.SshDocker)
-            env.SetSsh(Blank(i.Host), i.Port ?? 22, Blank(i.Username), ProtectIfSet(i.PrivateKey));
+            env.SetSsh(Blank(i.Host), i.Port ?? 22, Blank(i.Username), ProtectIfSet(i.PrivateKey),
+                string.IsNullOrEmpty(i.Password) ? null : secrets.Protect(i.Password)); // passwords as typed: no trimming
         else
             env.SetKubernetes(ProtectIfSet(i.Kubeconfig), Blank(i.AksTenantId), Blank(i.AksClientId), ProtectIfSet(i.AksClientSecret),
                 Blank(i.AksSubscriptionId), Blank(i.AksResourceGroup), Blank(i.AksClusterName), i.AksAdmin);

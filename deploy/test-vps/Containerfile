@@ -1,4 +1,4 @@
-# A stand-in "VPS" for deploy tests: sshd (key auth only) + docker CLI with the compose plugin.
+# A stand-in "VPS" for deploy tests: sshd (key auth; a root password too when ROOT_PASSWORD is set) + docker CLI with the compose plugin.
 # Mount the host's Podman/Docker socket at /var/run/docker.sock; deployed apps then run as real
 # sibling containers. Pass the public key to accept in AUTHORIZED_KEY.
 FROM docker.io/library/alpine:3.22

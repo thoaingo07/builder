@@ -105,6 +105,33 @@ public sealed class ProjectTests(AspireFixture aspire) : IDisposable
         Assert.False(refused["ok"]!.GetValue<bool>());
         Assert.Contains("SSH to root@", refused["message"]!.GetValue<string>());
 
+        // a password instead of a key: the Test button, and $DEPLOY_SSH in a task's own commands
+        var byPassword = await E2E.PostAsync(http, "/api/environments", new
+        {
+            name = "vps-password", type = "SshDocker", requiresApproval = false,
+            host = vps.Host, port = vps.Port, username = "root", password = aspire.VpsPassword,
+        });
+        Assert.True(byPassword["hasPassword"]!.GetValue<bool>());
+        Assert.False(byPassword["hasPrivateKey"]!.GetValue<bool>());
+        var viaPassword = await E2E.PostAsync(http, $"/api/environments/{byPassword["id"]}/test", new { });
+        Assert.True(viaPassword["ok"]!.GetValue<bool>(), viaPassword["message"]!.GetValue<string>());
+        var wrongPassword = await E2E.PostAsync(http, "/api/environments", new
+        {
+            name = "vps-wrong-password", type = "SshDocker", requiresApproval = false,
+            host = vps.Host, port = vps.Port, username = "root", password = "not-it",
+        });
+        Assert.False((await E2E.PostAsync(http, $"/api/environments/{wrongPassword["id"]}/test", new { }))["ok"]!.GetValue<bool>());
+
+        var repo = E2E.CreateRepository(Path.Combine(_root, "pw"), new Dictionary<string, string>
+        {
+            [".builder/runners/ssh.yml"] = "version: '3'\ntasks:\n  ssh:\n    x-deploy: { environment: vps-password }\n    cmds:\n      - $DEPLOY_SSH \"echo remote-$((40+2))\"\n",
+        });
+        var runner = await E2E.MapRunnerAsync(http, repo, ".builder/runners/ssh.yml", "ssh");
+        var build = await E2E.RunBuildAsync(http, runner, null, 120);
+        var log = await LogOfAsync(http, build);
+        Assert.Contains("remote-42", log);
+        Assert.DoesNotContain(aspire.VpsPassword, log);
+
         var nobody = await E2E.PostAsync(http, "/api/environments", new
         {
             name = "no-agent", type = "SshDocker", requiresApproval = false, agentLabels = new[] { "no-such-label" },

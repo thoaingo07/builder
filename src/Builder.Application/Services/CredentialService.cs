@@ -85,7 +85,8 @@ public sealed class CredentialService(IAppDbContext db, GitRemotes remotes, IAcr
 
     /// <summary>An environment's secrets in clear text (for the agent running a job, a teardown or a test).</summary>
     public DeploySecrets Reveal(Domain.Deployments.DeployEnvironment e) => new(
-        Unprotect(e.PrivateKeyProtected), Unprotect(e.KubeconfigProtected), Unprotect(e.AksClientSecretProtected));
+        Unprotect(e.PrivateKeyProtected), Unprotect(e.KubeconfigProtected), Unprotect(e.AksClientSecretProtected),
+        Unprotect(e.PasswordProtected));
 
     private string? Unprotect(string? value) => value is null ? null : protector.Unprotect(value);
 
