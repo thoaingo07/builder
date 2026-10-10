@@ -26,6 +26,8 @@ public static class AgentHubNames
     public const string Teardown = nameof(Teardown);
     /// <summary>The build finished: delete its checkout unless the agent keeps workspaces.</summary>
     public const string ReleaseBuild = nameof(ReleaseBuild);
+    /// <summary>Check an environment's credentials (SSH login + docker, or the Kubernetes API); returns <see cref="EnvironmentTestResult"/>.</summary>
+    public const string TestEnvironment = nameof(TestEnvironment);
 }
 
 public sealed record AgentHello(
@@ -103,6 +105,10 @@ public sealed record DeployTarget(
     string? Namespace,
     string? Url,
     ContainerTarget? Container = null);
+
+/// <summary>Sent only to the agent picked for the test, and only for the duration of the call.</summary>
+public sealed record EnvironmentTestRequest(DeployTarget Target, DeploySecrets Secrets);
+public sealed record EnvironmentTestResult(bool Ok, string Message);
 
 public enum ContainerStrategyKind { BlueGreen, Recreate }
 

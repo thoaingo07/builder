@@ -11,10 +11,12 @@ public enum ConnectionAuthKind { Pat, ServicePrincipal }
 /// Credentials for a git host (Azure DevOps, plain git) or for Azure (container registries).
 /// <see cref="TokenProtected"/> holds ciphertext: the PAT, or the service principal's client secret.
 /// </summary>
-public sealed class GitConnection : IOrgScoped
+public sealed class GitConnection : Projects.IProjectScoped
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7();
     public Guid OrgId { get; private set; }
+    /// <summary>Null: shared by the whole organization.</summary>
+    public Guid? ProjectId { get; private set; }
     public string Name { get; private set; } = "";
     public ConnectionType Type { get; private set; }
     /// <summary>Azure DevOps organization URL (https://dev.azure.com/org) or a git host base URL.</summary>
@@ -28,9 +30,10 @@ public sealed class GitConnection : IOrgScoped
 
     private GitConnection() { }
 
-    public GitConnection(Guid orgId, string name, ConnectionType type, string url, DateTimeOffset now)
+    public GitConnection(Guid orgId, Guid? projectId, string name, ConnectionType type, string url, DateTimeOffset now)
     {
         OrgId = orgId;
+        ProjectId = projectId;
         CreatedAt = now;
         Update(name, type, url, null, null);
     }
@@ -44,6 +47,9 @@ public sealed class GitConnection : IOrgScoped
         Username = string.IsNullOrWhiteSpace(username) ? null : username.Trim();
         if (tokenProtected is not null) TokenProtected = tokenProtected;
     }
+
+    /// <summary>Null: shared by the whole organization.</summary>
+    public void MoveTo(Guid? projectId) => ProjectId = projectId;
 
     /// <summary>Use an Entra service principal (client credentials) instead of a PAT.</summary>
     public void UseServicePrincipal(string tenantId, string clientId)

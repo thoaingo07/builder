@@ -39,6 +39,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ICurren
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<Membership> Memberships => Set<Membership>();
     public DbSet<Repository> Repositories => Set<Repository>();
+    public DbSet<Domain.Projects.Project> Projects => Set<Domain.Projects.Project>();
     public DbSet<Domain.Secrets.Secret> Secrets => Set<Domain.Secrets.Secret>();
     public DbSet<Domain.Triggers.RunnerSchedule> RunnerSchedules => Set<Domain.Triggers.RunnerSchedule>();
 
@@ -97,6 +98,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ICurren
             e.HasKey(x => new { x.OrgId, x.UserId });
         });
         m.Entity<Repository>(e => e.ToTable("repositories"));
+        m.Entity<Domain.Projects.Project>(e => e.ToTable("projects"));
         m.Entity<Domain.Secrets.Secret>(e => e.ToTable("secrets"));
         m.Entity<Domain.Triggers.RunnerSchedule>(e =>
         {
@@ -112,6 +114,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ICurren
         m.Entity<DeployEnvironment>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
         m.Entity<Deployment>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
         m.Entity<Repository>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
+        m.Entity<Domain.Projects.Project>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
         m.Entity<Domain.Triggers.RunnerSchedule>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
         m.Entity<Domain.Secrets.Secret>().HasQueryFilter(x => OrgFilter == null || x.OrgId == OrgFilter);
         m.Entity<Agent>().HasQueryFilter(x => OrgFilter == null || x.OrgId == null || x.OrgId == OrgFilter);
@@ -119,6 +122,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ICurren
         // relationships without navigations, mirroring the FKs in db/migrations (also orders inserts)
         m.Entity<Repository>().HasOne<GitConnection>().WithMany().HasForeignKey(r => r.ConnectionId).OnDelete(DeleteBehavior.Restrict);
         m.Entity<Pipeline>().HasOne<Repository>().WithMany().HasForeignKey(p => p.RepositoryId).OnDelete(DeleteBehavior.Cascade);
+        m.Entity<Domain.Projects.Project>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
+        m.Entity<Build>().HasOne<Domain.Projects.Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        m.Entity<Deployment>().HasOne<Domain.Projects.Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        m.Entity<Repository>().HasOne<Domain.Projects.Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        m.Entity<Pipeline>().HasOne<Domain.Projects.Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        m.Entity<GitConnection>().HasOne<Domain.Projects.Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        m.Entity<DeployEnvironment>().HasOne<Domain.Projects.Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        m.Entity<Domain.Secrets.Secret>().HasOne<Domain.Projects.Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         m.Entity<Repository>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
         m.Entity<Pipeline>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
         m.Entity<Build>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);

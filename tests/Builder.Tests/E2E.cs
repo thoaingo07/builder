@@ -34,11 +34,11 @@ internal static class E2E
 
     /// <summary>Adds the repository to the current organization and maps one runner file; returns the runner id.</summary>
     public static async Task<string> MapRunnerAsync(HttpClient http, string repositoryUrl, string runnerFile, string? entryTask = null,
-        string defaultBranch = "main")
+        string defaultBranch = "main", string? projectId = null)
     {
         var repos = await GetAsync(http, "/api/repositories");
         var repo = repos.AsArray().FirstOrDefault(r => r!["url"]!.GetValue<string>() == repositoryUrl)
-            ?? await PostAsync(http, "/api/repositories", new { url = repositoryUrl, defaultBranch });
+            ?? await PostAsync(http, "/api/repositories", new { url = repositoryUrl, defaultBranch, projectId });
         var mapped = await PostAsync(http, $"/api/repositories/{repo["id"]}/runners",
             new { runners = new[] { new { path = runnerFile, entryTask } } });
         return mapped.AsArray().Single()!["id"]!.GetValue<string>();
@@ -49,6 +49,14 @@ internal static class E2E
         var response = await http.PostAsJsonAsync(url, body);
         var text = await response.Content.ReadAsStringAsync();
         Assert.True(response.IsSuccessStatusCode, $"POST {url} → {(int)response.StatusCode}: {text}");
+        return JsonNode.Parse(text)!;
+    }
+
+    public static async Task<JsonNode> PutAsync(HttpClient http, string url, object body)
+    {
+        var response = await http.PutAsJsonAsync(url, body);
+        var text = await response.Content.ReadAsStringAsync();
+        Assert.True(response.IsSuccessStatusCode, $"PUT {url} → {(int)response.StatusCode}: {text}");
         return JsonNode.Parse(text)!;
     }
 

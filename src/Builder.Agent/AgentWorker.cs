@@ -46,6 +46,7 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
         _hub.On<CleanupRequest>(AgentHubNames.Cleanup, request => _ = Task.Run(() => CleanupAsync(request)));
         _hub.On<TeardownRequest>(AgentHubNames.Teardown, request => _ = Task.Run(() => TeardownAsync(request)));
         _hub.On<Guid>(AgentHubNames.ReleaseBuild, ReleaseBuild);
+        _hub.On<EnvironmentTestRequest, EnvironmentTestResult>(AgentHubNames.TestEnvironment, TestEnvironmentAsync);
         _hub.Reconnected += async _ => await RegisterAsync(_stopping.Token);
     }
 
@@ -216,6 +217,25 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
         }
         _log.LogInformation("Cleanup freed {MB} MB", freed / 1024 / 1024);
         await _hub.SendAsync(AgentHubNames.CleanupCompleted, new CleanupResult(request.RequestId, freed, string.Join("\n", output)));
+    }
+
+    private async Task<EnvironmentTestResult> TestEnvironmentAsync(EnvironmentTestRequest request)
+    {
+        var temp = Path.Combine(_options.WorkRoot, "tmp", "test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(80));
+            return await new Deployer(request.Target, request.Secrets, temp, _options.WorkRoot).TestAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return new EnvironmentTestResult(false, "Timed out.");
+        }
+        finally
+        {
+            if (Directory.Exists(temp)) Directory.Delete(temp, true); // key, kubeconfig, az login state
+        }
     }
 
     private async Task TeardownAsync(TeardownRequest request)

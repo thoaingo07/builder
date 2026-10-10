@@ -42,23 +42,25 @@ public sealed class CleanupService(IAppDbContext db, IClock clock, ICurrentOrg c
 
 public sealed class DashboardService(IAppDbContext db, IClock clock, AgentService agents, DeploymentService deployments)
 {
-    public async Task<DashboardDto> GetAsync(CancellationToken ct)
+    /// <summary>The organization's activity, or one project's (agents are always the organization's).</summary>
+    public async Task<DashboardDto> GetAsync(CancellationToken ct, Guid? projectId = null)
     {
+        var builds = db.Builds.AsNoTracking().Where(b => projectId == null || b.ProjectId == projectId);
         var names = await db.Pipelines.AsNoTracking().ToDictionaryAsync(p => p.Id, p => p.Name, ct);
-        var active = await db.Builds.AsNoTracking().Include(b => b.Jobs)
+        var active = await builds.Include(b => b.Jobs)
             .Where(b => b.FinishedAt == null).OrderByDescending(b => b.QueuedAt).Take(50).ToListAsync(ct);
-        var recent = await db.Builds.AsNoTracking().Include(b => b.Jobs)
+        var recent = await builds.Include(b => b.Jobs)
             .Where(b => b.FinishedAt != null).OrderByDescending(b => b.FinishedAt).Take(15).ToListAsync(ct);
 
         var since = clock.UtcNow.AddHours(-24);
-        var stats = await db.Builds.Where(b => b.QueuedAt >= since)
+        var stats = await builds.Where(b => b.QueuedAt >= since)
             .GroupBy(b => b.Status).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
 
         return new DashboardDto(
             await agents.ListAsync(ct),
             active.Select(b => b.ToSummary(names.GetValueOrDefault(b.PipelineId, "?"))).ToList(),
             recent.Select(b => b.ToSummary(names.GetValueOrDefault(b.PipelineId, "?"))).ToList(),
-            await deployments.ListAsync(null, true, ct),
+            await deployments.ListAsync(null, true, ct, projectId),
             new Last24hDto(stats.GetValueOrDefault(BuildStatus.Succeeded), stats.GetValueOrDefault(BuildStatus.Failed),
                 stats.GetValueOrDefault(BuildStatus.Canceled),
                 stats.GetValueOrDefault(BuildStatus.Running) + stats.GetValueOrDefault(BuildStatus.Planning) + stats.GetValueOrDefault(BuildStatus.Canceling)));

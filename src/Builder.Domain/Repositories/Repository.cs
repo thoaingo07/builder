@@ -9,6 +9,7 @@ public sealed class Repository : IOrgScoped
 
     public Guid Id { get; private set; } = Guid.CreateVersion7();
     public Guid OrgId { get; private set; }
+    public Guid ProjectId { get; private set; }
     public Guid? ConnectionId { get; private set; }
     public string Name { get; private set; } = "";
     public string Url { get; private set; } = "";
@@ -21,9 +22,13 @@ public sealed class Repository : IOrgScoped
 
     public void SetHookSecretHash(string hash) => HookSecretHash = hash;
 
-    public Repository(Guid orgId, Guid? connectionId, string? name, string url, string? defaultBranch, DateTimeOffset now)
+    /// <summary>Moves the repository (its runners follow, see <see cref="Pipelines.Pipeline.MovedTo"/>).</summary>
+    public void MoveTo(Guid projectId) => ProjectId = projectId;
+
+    public Repository(Guid orgId, Guid projectId, Guid? connectionId, string? name, string url, string? defaultBranch, DateTimeOffset now)
     {
         OrgId = orgId;
+        ProjectId = projectId;
         CreatedAt = now;
         Update(connectionId, name, url, defaultBranch);
     }

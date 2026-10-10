@@ -12,6 +12,8 @@ public sealed class Pipeline : IOrgScoped
     public Guid Id { get; private set; } = Guid.CreateVersion7();
     public Guid OrgId { get; private set; }
     public Guid RepositoryId { get; private set; }
+    /// <summary>The repository's project (copied; runner names are unique per project).</summary>
+    public Guid ProjectId { get; private set; }
     public string Name { get; private set; } = "";
     /// <summary>Path of the runner Taskfile inside the repository, e.g. <c>.builder/runners/ci.yml</c>.</summary>
     public string TaskfilePath { get; private set; } = "";
@@ -35,6 +37,7 @@ public sealed class Pipeline : IOrgScoped
     public Pipeline(Repository repository, string name, string taskfilePath, string? entryTask, DateTimeOffset now)
     {
         OrgId = repository.OrgId;
+        ProjectId = repository.ProjectId;
         RepositoryId = repository.Id;
         TaskfilePath = taskfilePath.Trim().TrimStart('/');
         CreatedAt = now;
@@ -49,6 +52,8 @@ public sealed class Pipeline : IOrgScoped
     }
 
     public int NextBuildNumber() => ++LastBuildNumber;
+
+    public void MovedTo(Guid projectId) => ProjectId = projectId;
 
     /// <summary>Runner name from its file: <c>.builder/runners/deploy-prod.yml</c> → <c>deploy-prod</c>.</summary>
     public static string NameFromFile(string path) => Path.GetFileNameWithoutExtension(path);

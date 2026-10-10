@@ -46,12 +46,12 @@ public sealed class CredentialService(IAppDbContext db, GitRemotes remotes, IAcr
             if (!IsAzureContainerRegistry(spec.Registry))
             {
                 // Docker Hub, GHCR, …: the registry connection's user name + access token
-                var registry = await RegistryConnectionAsync(build.OrgId, spec, ct);
+                var registry = await RegistryConnectionAsync(build.OrgId, build.ProjectId, spec, ct);
                 registries.Add(new RegistryLogin(spec.Registry, registry.Username ?? "",
                     protector.Unprotect(registry.TokenProtected ?? throw new DomainException($"Connection '{registry.Name}' has no token."))));
                 continue;
             }
-            var azure = await AzureConnectionAsync(build.OrgId, spec, ct);
+            var azure = await AzureConnectionAsync(build.OrgId, build.ProjectId, spec, ct);
             var arm = await remotes.ArmTokenAsync(azure, ct);
             var refresh = await acr.ExchangeAsync(spec.Registry, azure.TenantId!, arm.Token, ct);
             registries.Add(new RegistryLogin(spec.Registry, IAcrTokens.DockerUser, refresh.Token));
@@ -61,8 +61,7 @@ public sealed class CredentialService(IAppDbContext db, GitRemotes remotes, IAcr
         DeploySecrets? deploy = null;
         if (job.Deploy is { } deploySpec)
         {
-            var env = await db.Environments.AsNoTracking().IgnoreQueryFilters()
-                .FirstOrDefaultAsync(e => e.OrgId == build.OrgId && e.Name == deploySpec.Environment, ct)
+            var env = await ProjectLookup.EnvironmentAsync(db, build.OrgId, build.ProjectId, deploySpec.Environment, ct)
                 ?? throw new DomainException($"Environment '{deploySpec.Environment}' no longer exists.");
             deploy = Reveal(env);
         }
@@ -84,19 +83,24 @@ public sealed class CredentialService(IAppDbContext db, GitRemotes remotes, IAcr
         return Reveal(env);
     }
 
-    private DeploySecrets Reveal(Domain.Deployments.DeployEnvironment e) => new(
+    /// <summary>An environment's secrets in clear text (for the agent running a job, a teardown or a test).</summary>
+    public DeploySecrets Reveal(Domain.Deployments.DeployEnvironment e) => new(
         Unprotect(e.PrivateKeyProtected), Unprotect(e.KubeconfigProtected), Unprotect(e.AksClientSecretProtected));
 
     private string? Unprotect(string? value) => value is null ? null : protector.Unprotect(value);
 
-    /// <summary>The Azure connection a registry login uses: the one named, or the organization's only Azure connection.</summary>
-    public async Task<GitConnection> AzureConnectionAsync(Guid orgId, RegistrySpec spec, CancellationToken ct)
+    /// <summary>
+    /// The Azure connection a registry login uses: the one named (the project's own before a shared one), else the
+    /// project's only Azure connection, else the organization's only shared one.
+    /// </summary>
+    public async Task<GitConnection> AzureConnectionAsync(Guid orgId, Guid projectId, RegistrySpec spec, CancellationToken ct)
     {
-        var azure = await db.Connections.AsNoTracking().IgnoreQueryFilters()
-            .Where(c => c.OrgId == orgId && c.Type == ConnectionType.Azure).ToListAsync(ct);
+        var all = await ProjectLookup.ConnectionsAsync(db, orgId, projectId, ConnectionType.Azure, ct);
         if (spec.Connection is { } name)
-            return azure.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase))
+            return Domain.Projects.ProjectScope.Pick(all, projectId, name)
                 ?? throw new DomainException($"Registry {spec.Registry}: there is no Azure connection named '{name}'.");
+        var own = all.Where(c => c.ProjectId == projectId).ToList();
+        var azure = own.Count > 0 ? own : all;
         return azure.Count switch
         {
             1 => azure[0],
@@ -105,13 +109,16 @@ public sealed class CredentialService(IAppDbContext db, GitRemotes remotes, IAcr
         };
     }
 
-    /// <summary>The registry connection for a non-Azure registry: the one named, or the one whose URL is that host.</summary>
-    public async Task<GitConnection> RegistryConnectionAsync(Guid orgId, RegistrySpec spec, CancellationToken ct)
+    /// <summary>
+    /// The registry connection for a non-Azure registry: the one named, or the one whose URL is that host; the
+    /// project's own before a shared one.
+    /// </summary>
+    public async Task<GitConnection> RegistryConnectionAsync(Guid orgId, Guid projectId, RegistrySpec spec, CancellationToken ct)
     {
-        var all = await db.Connections.AsNoTracking().IgnoreQueryFilters()
-            .Where(c => c.OrgId == orgId && c.Type == ConnectionType.Registry).ToListAsync(ct);
+        var all = (await ProjectLookup.ConnectionsAsync(db, orgId, projectId, ConnectionType.Registry, ct))
+            .OrderBy(c => c.ProjectId == projectId ? 0 : 1).ToList();
         var match = spec.Connection is { } name
-            ? all.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase))
+            ? Domain.Projects.ProjectScope.Pick(all, projectId, name)
             : all.FirstOrDefault(c => string.Equals(RegistryHost(c.Url), spec.Registry, StringComparison.OrdinalIgnoreCase));
         return match ?? throw new DomainException(
             $"Registry {spec.Registry}: add a Container registry connection for it (user name + access token).");

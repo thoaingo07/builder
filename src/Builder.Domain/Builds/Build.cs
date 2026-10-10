@@ -10,6 +10,8 @@ public sealed class Build : IOrgScoped
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7();
     public Guid OrgId { get; private set; }
+    /// <summary>The runner's project when the build was queued.</summary>
+    public Guid ProjectId { get; private set; }
     public Guid PipelineId { get; private set; }
     public int Number { get; private set; }
     public string Branch { get; private set; } = "";
@@ -31,7 +33,7 @@ public sealed class Build : IOrgScoped
 
     private Build() { }
 
-    public static Build Queue(Guid orgId, Guid pipelineId, int number, string branch, string? entryTask,
+    public static Build Queue(Guid orgId, Guid projectId, Guid pipelineId, int number, string branch, string? entryTask,
         Dictionary<string, string>? variables, string requestedBy, DateTimeOffset now, string? commit = null,
         BuildReason reason = BuildReason.Manual, string? sourceRef = null, int? pullRequestId = null) => new()
     {
@@ -39,6 +41,7 @@ public sealed class Build : IOrgScoped
         SourceRef = sourceRef,
         PullRequestId = pullRequestId,
         OrgId = orgId,
+        ProjectId = projectId,
         PipelineId = pipelineId,
         Commit = commit,
         Number = number,

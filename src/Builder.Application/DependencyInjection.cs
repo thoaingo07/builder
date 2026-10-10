@@ -9,6 +9,7 @@ public static class DependencyInjection
     public static IServiceCollection AddApplication(this IServiceCollection services) => services
         .AddScoped<ICurrentOrg, CurrentOrg>()
         .AddScoped<OrganizationService>()
+        .AddScoped<ProjectService>()
         .AddScoped<RepositoryService>()
         .AddScoped<SecretService>()
         .AddScoped<CredentialService>()

@@ -18,15 +18,19 @@ public sealed class ConnectionService(
     ISecretProtector secrets,
     IAzureDevOpsClient azureDevOps,
     IGitService git,
-    GitRemotes remotes)
+    GitRemotes remotes,
+    ProjectService projects,
+    IRegistryLogins registryLogins)
 {
-    public async Task<List<ConnectionDto>> ListAsync(CancellationToken ct) =>
-        (await db.Connections.AsNoTracking().OrderBy(c => c.Name).ToListAsync(ct)).Select(c => c.ToDto()).ToList();
+    /// <summary>All of the organization's, or what one project sees: its own and the shared ones.</summary>
+    public async Task<List<ConnectionDto>> ListAsync(CancellationToken ct, Guid? projectId = null) =>
+        (await db.Connections.AsNoTracking().Where(c => projectId == null || c.ProjectId == projectId || c.ProjectId == null)
+            .OrderBy(c => c.Name).ToListAsync(ct)).Select(c => c.ToDto()).ToList();
 
     public async Task<ConnectionDto> CreateAsync(ConnectionInput input, CancellationToken ct)
     {
         current.RequireRole(OrgRole.Admin);
-        var c = new GitConnection(current.RequireOrgId(), input.Name, input.Type, Normalize(input.Type, input.Url), clock.UtcNow);
+        var c = new GitConnection(current.RequireOrgId(), await projects.CheckAsync(input.ProjectId, ct), input.Name, input.Type, Normalize(input.Type, input.Url), clock.UtcNow);
         c.Update(input.Name, input.Type, Normalize(input.Type, input.Url), input.Username, Protect(input.Token));
         ApplyAuth(c, input);
         if (c.Type == ConnectionType.Registry && string.IsNullOrWhiteSpace(c.Username))
@@ -46,6 +50,14 @@ public sealed class ConnectionService(
         var c = await db.Connections.FirstOrDefaultAsync(x => x.Id == id, ct) ?? throw new NotFoundException("Connection");
         c.Update(input.Name, input.Type, Normalize(input.Type, input.Url), input.Username, Protect(input.Token));
         ApplyAuth(c, input);
+        if (input.ProjectId != c.ProjectId)
+        {
+            // repositories using it must still see it: in its new project, or it becomes shared
+            var newProject = await projects.CheckAsync(input.ProjectId, ct);
+            if (newProject is not null && await db.Repositories.AnyAsync(r => r.ConnectionId == id && r.ProjectId != newProject, ct))
+                throw new DomainException("Repositories of other projects use this connection; keep it shared.");
+            c.MoveTo(newProject);
+        }
         await db.SaveChangesAsync(ct);
         return c.ToDto();
     }
@@ -65,7 +77,17 @@ public sealed class ConnectionService(
     {
         var c = await FindAsync(id, ct);
         if (c.Type == ConnectionType.Registry)
-            return new ConnectionTestDto(true, $"Saved. The token is checked by docker login when a job uses x-registries: [{CredentialService.RegistryHost(c.Url)}].");
+        {
+            try
+            {
+                return new ConnectionTestDto(true, await registryLogins.CheckAsync(CredentialService.RegistryHost(c.Url), c.Username ?? "",
+                    secrets.Unprotect(c.TokenProtected ?? throw new DomainException("The connection has no token.")), ct));
+            }
+            catch (Exception ex) when (ex is DomainException or ExternalServiceException)
+            {
+                return new ConnectionTestDto(false, ex.Message);
+            }
+        }
         if (c.Type == ConnectionType.Azure)
         {
             var arm = await remotes.ArmTokenAsync(c, ct);

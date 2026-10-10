@@ -41,7 +41,7 @@ public sealed class BuildPlanningService(
             var plan = planner.Plan(yaml, string.IsNullOrEmpty(build.EntryTask) ? pipeline.EntryTask : build.EntryTask);
             entry = plan.EntryTask;
             CheckInputs(plan, build.Variables);
-            jobs = await ToJobsAsync(plan, build.OrgId, pipeline.RepositoryId, ct);
+            jobs = await ToJobsAsync(plan, build.OrgId, build.ProjectId, pipeline.RepositoryId, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -86,17 +86,16 @@ public sealed class BuildPlanningService(
         if (problems.Count > 0) throw new TaskfileException("Missing or invalid variables: " + string.Join("; ", problems));
     }
 
-    private async Task<List<BuildJob>> ToJobsAsync(TaskfilePlan plan, Guid orgId, Guid repositoryId, CancellationToken ct)
+    private async Task<List<BuildJob>> ToJobsAsync(TaskfilePlan plan, Guid orgId, Guid projectId, Guid repositoryId, CancellationToken ct)
     {
         var envNames = plan.Jobs.Where(j => j.Deploy is not null).Select(j => j.Deploy!.Environment).Distinct().ToList();
-        var envs = await db.Environments.AsNoTracking().IgnoreQueryFilters().Where(e => e.OrgId == orgId && envNames.Contains(e.Name)).ToListAsync(ct);
+        var envs = await ProjectLookup.EnvironmentsAsync(db, orgId, projectId, envNames, ct);
         var missing = envNames.Except(envs.Select(e => e.Name), StringComparer.OrdinalIgnoreCase).ToList();
         if (missing.Count > 0)
             throw new TaskfileException($"Unknown deploy environment(s): {string.Join(", ", missing)}. Create them under Environments.");
 
         var wanted = plan.Jobs.SelectMany(j => j.Secrets).Distinct().ToList();
-        var known = await db.Secrets.AsNoTracking().IgnoreQueryFilters().Where(s => s.OrgId == orgId && wanted.Contains(s.Name))
-            .Select(s => s.Name).ToListAsync(ct);
+        var known = await ProjectLookup.SecretNamesAsync(db, orgId, projectId, wanted, ct);
         var unknown = wanted.Except(known).ToList();
         if (unknown.Count > 0)
             throw new TaskfileException($"Unknown secret(s): {string.Join(", ", unknown)}. Add them under Secrets.");
@@ -106,8 +105,8 @@ public sealed class BuildPlanningService(
         {
             try
             {
-                if (CredentialService.IsAzureContainerRegistry(spec.Registry)) await credentials.AzureConnectionAsync(orgId, spec, ct);
-                else await credentials.RegistryConnectionAsync(orgId, spec, ct);
+                if (CredentialService.IsAzureContainerRegistry(spec.Registry)) await credentials.AzureConnectionAsync(orgId, projectId, spec, ct);
+                else await credentials.RegistryConnectionAsync(orgId, projectId, spec, ct);
             }
             catch (Domain.DomainException ex)
             {

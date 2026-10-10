@@ -13,7 +13,7 @@ public sealed record BuildSummaryDto(
     Guid Id, Guid PipelineId, string PipelineName, int Number, string Branch, string? Commit, string EntryTask,
     BuildStatus Status, string RequestedBy, string? Error,
     DateTimeOffset QueuedAt, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, JobCounts JobCounts,
-    BuildReason Reason = BuildReason.Manual, int? PullRequestId = null);
+    BuildReason Reason = BuildReason.Manual, int? PullRequestId = null, Guid ProjectId = default);
 
 public sealed record ApprovalDto(string Message, List<string> Approvers, string? DecidedBy, DateTimeOffset? DecidedAt, string? Comment);
 
@@ -30,7 +30,7 @@ public sealed record BuildDetailDto(
     BuildStatus Status, string RequestedBy, string? Error,
     DateTimeOffset QueuedAt, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, JobCounts JobCounts,
     Dictionary<string, string> Variables, List<JobDto> Jobs, List<ArtifactDto> Artifacts, List<DeploymentDto> Deployments,
-    BuildReason Reason, int? PullRequestId, string? SourceRef);
+    BuildReason Reason, int? PullRequestId, string? SourceRef, Guid ProjectId);
 
 public sealed record LogLineDto(long Id, Guid JobId, DateTimeOffset Timestamp, LogStreamKind Stream, string Text, int? Step);
 
@@ -41,7 +41,7 @@ public sealed record RunInputsDto(string Branch, string EntryTask, List<RunInput
 /// <summary>A runner: one mapped file from a repository's .builder/runners folder.</summary>
 public sealed record PipelineDto(
     Guid Id, string Name, Guid RepositoryId, string RepositoryName, string RepositoryUrl, string DefaultBranch,
-    string TaskfilePath, string? EntryTask, BuildSummaryDto? LastBuild);
+    string TaskfilePath, string? EntryTask, BuildSummaryDto? LastBuild, Guid ProjectId);
 
 /// <summary>Rename a runner or change its default entry task (the file it runs never changes).</summary>
 public sealed record PipelineInput(string Name, string? EntryTask);
@@ -71,31 +71,33 @@ public sealed record EnvironmentDto(
     Guid Id, string Name, EnvironmentType Type, bool RequiresApproval, List<string> Approvers, List<string> AgentLabels,
     string? Host, int Port, string? Username, bool HasPrivateKey,
     bool HasKubeconfig, string? AksTenantId, string? AksClientId, bool HasAksClientSecret,
-    string? AksSubscriptionId, string? AksResourceGroup, string? AksClusterName, bool AksAdmin);
+    string? AksSubscriptionId, string? AksResourceGroup, string? AksClusterName, bool AksAdmin, Guid? ProjectId);
 
+/// <summary>ProjectId null: shared by the whole organization.</summary>
 public sealed record EnvironmentInput(
     string Name, EnvironmentType Type, bool RequiresApproval, List<string>? Approvers, List<string>? AgentLabels,
     string? Host, int? Port, string? Username, string? PrivateKey,
     string? Kubeconfig, string? AksTenantId, string? AksClientId, string? AksClientSecret,
-    string? AksSubscriptionId, string? AksResourceGroup, string? AksClusterName, bool AksAdmin);
+    string? AksSubscriptionId, string? AksResourceGroup, string? AksClusterName, bool AksAdmin, Guid? ProjectId = null);
 
 public sealed record DeploymentDto(
     Guid Id, Guid EnvironmentId, string EnvironmentName, Guid PipelineId, string PipelineName, Guid BuildId,
     int BuildNumber, Guid JobId, string Name, string? Url, DeploymentStatus Status, string? Output,
-    DateTimeOffset CreatedAt, DateTimeOffset? UpdatedAt, bool IsContainer);
+    DateTimeOffset CreatedAt, DateTimeOffset? UpdatedAt, bool IsContainer, Guid ProjectId);
 
 public sealed record ConnectionDto(Guid Id, string Name, ConnectionType Type, string Url, string? Username, bool HasToken,
-    ConnectionAuthKind AuthKind, string? TenantId, string? ClientId);
+    ConnectionAuthKind AuthKind, string? TenantId, string? ClientId, Guid? ProjectId);
 /// <summary>Token = the PAT, or the client secret when AuthKind is ServicePrincipal (write-only either way).</summary>
 public sealed record ConnectionInput(string Name, ConnectionType Type, string Url, string? Username, string? Token,
-    ConnectionAuthKind? AuthKind = null, string? TenantId = null, string? ClientId = null);
+    ConnectionAuthKind? AuthKind = null, string? TenantId = null, string? ClientId = null, Guid? ProjectId = null);
 public sealed record ConnectionTestDto(bool Ok, string Message);
 /// <summary>A repository as the git host lists it (Azure DevOps picker).</summary>
 public sealed record RemoteRepositoryDto(string Project, string Name, string Url, string? DefaultBranch);
 
 public sealed record RepositoryDto(Guid Id, string Name, string Url, Guid? ConnectionId, string? ConnectionName,
-    string DefaultBranch, int RunnerCount, DateTimeOffset CreatedAt);
-public sealed record RepositoryInput(Guid? ConnectionId, string? Name, string Url, string? DefaultBranch);
+    string DefaultBranch, int RunnerCount, DateTimeOffset CreatedAt, Guid ProjectId);
+/// <summary>ProjectId null on create: the organization's only project (one named Default is created when there is none).</summary>
+public sealed record RepositoryInput(Guid? ConnectionId, string? Name, string Url, string? DefaultBranch, Guid? ProjectId = null);
 
 /// <summary>A file in .builder/runners at a branch, with what Builder would run, and whether it is mapped.</summary>
 public sealed record RunnerFileDto(string Path, string SuggestedName, string? EntryTask, List<string> Tasks,
@@ -119,8 +121,13 @@ public sealed record HookSetupDto(string Url, string Header, string? Secret, int
 public sealed record ScheduleDto(string Cron, string TimeZone, string Branch, DateTimeOffset? NextRunAt, DateTimeOffset? LastRunAt);
 public sealed record PipelineTriggersDto(Domain.Triggers.TriggerSpec Triggers, string? Commit, string? Error, List<ScheduleDto> Schedules);
 
-public sealed record SecretDto(Guid Id, string Name, string? Description, DateTimeOffset UpdatedAt, string UpdatedBy);
-public sealed record SecretInput(string Name, string? Value, string? Description);
+public sealed record SecretDto(Guid Id, string Name, string? Description, DateTimeOffset UpdatedAt, string UpdatedBy, Guid? ProjectId);
+/// <summary>ProjectId null: shared by the whole organization.</summary>
+public sealed record SecretInput(string Name, string? Value, string? Description, Guid? ProjectId = null);
+
+public sealed record ProjectDto(Guid Id, string Name, string Slug, string? Description, int RepositoryCount, int RunnerCount,
+    int ConnectionCount, int EnvironmentCount, int SecretCount, DateTimeOffset CreatedAt);
+public sealed record ProjectInput(string Name, string? Description);
 
 public sealed record CleanupInput(int OlderThanDays, int KeepLastPerPipeline, bool RemoveWorkspaces, bool DockerPrune);
 public sealed record CleanupResultDto(int BuildsDeleted, int ArtifactsDeleted, long BytesFreed, int AgentsNotified);

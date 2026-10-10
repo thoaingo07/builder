@@ -116,7 +116,7 @@ public sealed class SchedulerService(
         DeployTarget? deploy = null;
         if (job.Deploy is { } spec)
         {
-            var e = await db.Environments.AsNoTracking().IgnoreQueryFilters().FirstOrDefaultAsync(x => x.OrgId == build.OrgId && x.Name == spec.Environment, ct)
+            var e = await ProjectLookup.EnvironmentAsync(db, build.OrgId, build.ProjectId, spec.Environment, ct)
                 ?? throw new InvalidOperationException($"Environment '{spec.Environment}' no longer exists.");
             deploy = ToTarget(e, spec, build);
         }
@@ -127,6 +127,12 @@ public sealed class SchedulerService(
             artifacts.Select(a => new ArtifactRef(a.Id, a.Name, $"/api/agent/artifacts/{a.Id}")).ToArray(),
             deploy, job.Secrets.ToArray());
     }
+
+    /// <summary>The environment alone (nothing to deploy), e.g. to test its credentials.</summary>
+    public static DeployTarget ToTarget(DeployEnvironment e) => new(
+        e.Type == EnvironmentType.Kubernetes ? DeployTargetType.Kubernetes : DeployTargetType.SshDocker,
+        e.Name, e.Host, e.Port, e.Username, e.AksTenantId, e.AksClientId,
+        e.AksSubscriptionId, e.AksResourceGroup, e.AksClusterName, e.AksAdmin, null, null, null, null, null);
 
     public DeployTarget ToTarget(DeployEnvironment e, DeploySpec spec, Build? build) => new(
         e.Type == EnvironmentType.Kubernetes ? DeployTargetType.Kubernetes : DeployTargetType.SshDocker,
@@ -148,8 +154,9 @@ public sealed class SchedulerService(
     {
         if (job.Deploy is not { } spec) return;
         if (await db.Deployments.AnyAsync(d => d.JobId == job.Id, ct)) return;
-        var env = await db.Environments.AsNoTracking().IgnoreQueryFilters().FirstAsync(e => e.OrgId == build.OrgId && e.Name == spec.Environment, ct);
-        db.Deployments.Add(new Deployment(env, build.PipelineId, build.Id, build.Number, job.Id,
+        var env = await ProjectLookup.EnvironmentAsync(db, build.OrgId, build.ProjectId, spec.Environment, ct)
+            ?? throw new InvalidOperationException($"Environment '{spec.Environment}' no longer exists.");
+        db.Deployments.Add(new Deployment(env, build.ProjectId, build.PipelineId, build.Id, build.Number, job.Id,
             DeploymentName(spec, build), spec.Compose, spec.Manifests, spec.Url, clock.UtcNow, spec.Container));
     }
 

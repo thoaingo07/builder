@@ -23,7 +23,7 @@ public sealed class BuildService(
         var vars = (input.Variables ?? new())
             .Where(kv => !string.IsNullOrWhiteSpace(kv.Key))
             .ToDictionary(kv => kv.Key.Trim(), kv => kv.Value ?? "");
-        var build = Build.Queue(pipeline.OrgId, pipeline.Id, pipeline.NextBuildNumber(),
+        var build = Build.Queue(pipeline.OrgId, pipeline.ProjectId, pipeline.Id, pipeline.NextBuildNumber(),
             string.IsNullOrWhiteSpace(input.Branch) ? defaultBranch : input.Branch.Trim(),
             string.IsNullOrWhiteSpace(input.EntryTask) ? null : input.EntryTask.Trim(),
             vars, user, clock.UtcNow, commit, reason, sourceRef, pullRequestId);
@@ -42,9 +42,10 @@ public sealed class BuildService(
             BuildReason.Rerun, old.SourceRef, old.PullRequestId);
     }
 
-    public async Task<List<BuildSummaryDto>> ListAsync(Guid? pipelineId, BuildStatus? status, int take, CancellationToken ct)
+    public async Task<List<BuildSummaryDto>> ListAsync(Guid? pipelineId, BuildStatus? status, int take, CancellationToken ct, Guid? projectId = null)
     {
         var q = db.Builds.AsNoTracking().Include(b => b.Jobs).AsQueryable();
+        if (projectId is { } prj) q = q.Where(b => b.ProjectId == prj);
         if (pipelineId is { } pid) q = q.Where(b => b.PipelineId == pid);
         if (status is { } s) q = q.Where(b => b.Status == s);
         var builds = await q.OrderByDescending(b => b.QueuedAt).Take(Math.Clamp(take, 1, 500)).ToListAsync(ct);

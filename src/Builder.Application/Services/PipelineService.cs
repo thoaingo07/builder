@@ -15,9 +15,10 @@ public sealed class PipelineService(
     ITaskfilePlanner planner,
     GitRemotes remotes)
 {
-    public async Task<List<PipelineDto>> ListAsync(CancellationToken ct)
+    public async Task<List<PipelineDto>> ListAsync(CancellationToken ct, Guid? projectId = null)
     {
-        var pipelines = await db.Pipelines.AsNoTracking().OrderBy(p => p.Name).ToListAsync(ct);
+        var pipelines = await db.Pipelines.AsNoTracking().Where(p => projectId == null || p.ProjectId == projectId)
+            .OrderBy(p => p.Name).ToListAsync(ct);
         var repos = await db.Repositories.AsNoTracking().ToDictionaryAsync(r => r.Id, ct);
         var lastIds = await db.Builds.GroupBy(b => b.PipelineId)
             .Select(g => g.OrderByDescending(b => b.QueuedAt).Select(b => b.Id).First()).ToListAsync(ct);
@@ -106,5 +107,5 @@ public sealed class PipelineService(
     }
 
     private static PipelineDto ToDto(Pipeline p, Repository repo, Domain.Builds.Build? last) => new(
-        p.Id, p.Name, repo.Id, repo.Name, repo.Url, repo.DefaultBranch, p.TaskfilePath, p.EntryTask, last?.ToSummary(p.Name));
+        p.Id, p.Name, repo.Id, repo.Name, repo.Url, repo.DefaultBranch, p.TaskfilePath, p.EntryTask, last?.ToSummary(p.Name), p.ProjectId);
 }

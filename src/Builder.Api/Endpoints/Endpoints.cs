@@ -42,10 +42,21 @@ public static class Endpoints
             return Results.NoContent();
         });
 
-        api.MapGet("/dashboard", (DashboardService s, CancellationToken ct) => s.GetAsync(ct));
+        api.MapGet("/dashboard", (Guid? project, DashboardService s, CancellationToken ct) => s.GetAsync(ct, project));
+
+        // projects: list filters below take ?project=<id>
+        api.MapGet("/projects", (ProjectService s, CancellationToken ct) => s.ListAsync(ct));
+        api.MapGet("/projects/{id:guid}", (Guid id, ProjectService s, CancellationToken ct) => s.GetAsync(id, ct));
+        api.MapPost("/projects", (ProjectInput input, ProjectService s, CancellationToken ct) => s.CreateAsync(input, ct));
+        api.MapPut("/projects/{id:guid}", (Guid id, ProjectInput input, ProjectService s, CancellationToken ct) => s.UpdateAsync(id, input, ct));
+        api.MapDelete("/projects/{id:guid}", async (Guid id, ProjectService s, CancellationToken ct) =>
+        {
+            await s.DeleteAsync(id, ct);
+            return Results.NoContent();
+        });
 
         // repositories and their runner files
-        api.MapGet("/repositories", (RepositoryService s, CancellationToken ct) => s.ListAsync(ct));
+        api.MapGet("/repositories", (Guid? project, RepositoryService s, CancellationToken ct) => s.ListAsync(ct, project));
         api.MapGet("/repositories/{id:guid}", (Guid id, RepositoryService s, CancellationToken ct) => s.GetAsync(id, ct));
         api.MapPost("/repositories", (RepositoryInput input, RepositoryService s, CancellationToken ct) => s.CreateAsync(input, ct));
         api.MapPut("/repositories/{id:guid}", (Guid id, RepositoryInput input, RepositoryService s, CancellationToken ct) => s.UpdateAsync(id, input, ct));
@@ -66,7 +77,7 @@ public static class Endpoints
         api.MapPost("/pipelines/{id:guid}/triggers/refresh", (Guid id, TriggerService t, CancellationToken ct) => t.RefreshAsync(id, ct));
 
         // runners (mapped runner files)
-        api.MapGet("/pipelines", (PipelineService s, CancellationToken ct) => s.ListAsync(ct));
+        api.MapGet("/pipelines", (Guid? project, PipelineService s, CancellationToken ct) => s.ListAsync(ct, project));
         api.MapGet("/pipelines/{id:guid}", (Guid id, PipelineService s, CancellationToken ct) => s.GetAsync(id, ct));
         api.MapPut("/pipelines/{id:guid}", (Guid id, PipelineInput input, PipelineService s, CancellationToken ct) => s.UpdateAsync(id, input, ct));
         api.MapDelete("/pipelines/{id:guid}", async (Guid id, PipelineService s, BuildService b, CancellationToken ct) =>
@@ -83,8 +94,8 @@ public static class Endpoints
             s.QueueAsync(id, input, u.UserName(), ct));
 
         // builds
-        api.MapGet("/builds", (Guid? pipelineId, BuildStatus? status, int? take, BuildService s, CancellationToken ct) =>
-            s.ListAsync(pipelineId, status, take ?? 50, ct));
+        api.MapGet("/builds", (Guid? pipelineId, BuildStatus? status, int? take, Guid? project, BuildService s, CancellationToken ct) =>
+            s.ListAsync(pipelineId, status, take ?? 50, ct, project));
         api.MapGet("/builds/{id:guid}", (Guid id, BuildService s, CancellationToken ct) => s.GetAsync(id, ct));
         api.MapPost("/builds/{id:guid}/cancel", (Guid id, BuildService s, CancellationToken ct) => s.CancelAsync(id, ct));
         api.MapPost("/builds/{id:guid}/rerun", (Guid id, ClaimsPrincipal u, BuildService s, CancellationToken ct) =>
@@ -118,7 +129,7 @@ public static class Endpoints
             await s.RequestCleanupAsync(id, input, ct) ? Results.Accepted() : Results.Conflict(new { title = "The agent is offline." }));
 
         // environments & deployments
-        api.MapGet("/environments", (EnvironmentService s, CancellationToken ct) => s.ListAsync(ct));
+        api.MapGet("/environments", (Guid? project, EnvironmentService s, CancellationToken ct) => s.ListAsync(ct, project));
         api.MapPost("/environments", (EnvironmentInput input, EnvironmentService s, CancellationToken ct) => s.CreateAsync(input, ct));
         api.MapPut("/environments/{id:guid}", (Guid id, EnvironmentInput input, EnvironmentService s, CancellationToken ct) => s.UpdateAsync(id, input, ct));
         api.MapDelete("/environments/{id:guid}", async (Guid id, EnvironmentService s, CancellationToken ct) =>
@@ -126,13 +137,14 @@ public static class Endpoints
             await s.DeleteAsync(id, ct);
             return Results.NoContent();
         });
-        api.MapGet("/deployments", (Guid? environmentId, bool? active, DeploymentService s, CancellationToken ct) =>
-            s.ListAsync(environmentId, active ?? false, ct));
+        api.MapPost("/environments/{id:guid}/test", (Guid id, EnvironmentService s, CancellationToken ct) => s.TestAsync(id, ct));
+        api.MapGet("/deployments", (Guid? environmentId, bool? active, Guid? project, DeploymentService s, CancellationToken ct) =>
+            s.ListAsync(environmentId, active ?? false, ct, project));
         api.MapPost("/deployments/{id:guid}/destroy", (Guid id, DeploymentService s, CancellationToken ct) => s.DestroyAsync(id, ct));
         api.MapPost("/deployments/{id:guid}/rollback", (Guid id, DeploymentService s, CancellationToken ct) => s.RollbackAsync(id, ct));
 
         // connections (Azure DevOps first: test, projects, repositories, branches)
-        api.MapGet("/connections", (ConnectionService s, CancellationToken ct) => s.ListAsync(ct));
+        api.MapGet("/connections", (Guid? project, ConnectionService s, CancellationToken ct) => s.ListAsync(ct, project));
         api.MapPost("/connections", (ConnectionInput input, ConnectionService s, CancellationToken ct) => s.CreateAsync(input, ct));
         api.MapPut("/connections/{id:guid}", (Guid id, ConnectionInput input, ConnectionService s, CancellationToken ct) => s.UpdateAsync(id, input, ct));
         api.MapDelete("/connections/{id:guid}", async (Guid id, ConnectionService s, CancellationToken ct) =>
@@ -148,7 +160,7 @@ public static class Endpoints
             s.BranchesAsync(id, url, ct));
 
         // secrets (values are write-only)
-        api.MapGet("/secrets", (SecretService s, CancellationToken ct) => s.ListAsync(ct));
+        api.MapGet("/secrets", (Guid? project, SecretService s, CancellationToken ct) => s.ListAsync(ct, project));
         api.MapPost("/secrets", (SecretInput input, ClaimsPrincipal u, SecretService s, CancellationToken ct) => s.CreateAsync(input, u.UserName(), ct));
         api.MapPut("/secrets/{id:guid}", (Guid id, SecretInput input, ClaimsPrincipal u, SecretService s, CancellationToken ct) =>
             s.UpdateAsync(id, input, u.UserName(), ct));

@@ -18,11 +18,13 @@ public sealed class RepositoryService(
     ICurrentOrg current,
     IGitService git,
     ITaskfilePlanner planner,
-    GitRemotes remotes)
+    GitRemotes remotes,
+    ProjectService projects)
 {
-    public async Task<List<RepositoryDto>> ListAsync(CancellationToken ct)
+    public async Task<List<RepositoryDto>> ListAsync(CancellationToken ct, Guid? projectId = null)
     {
-        var repos = await db.Repositories.AsNoTracking().OrderBy(r => r.Name).ToListAsync(ct);
+        var repos = await db.Repositories.AsNoTracking().Where(r => projectId == null || r.ProjectId == projectId)
+            .OrderBy(r => r.Name).ToListAsync(ct);
         var connections = await db.Connections.AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Name, ct);
         var counts = await db.Pipelines.GroupBy(p => p.RepositoryId).Select(g => new { g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
@@ -35,8 +37,9 @@ public sealed class RepositoryService(
     public async Task<RepositoryDto> CreateAsync(RepositoryInput input, CancellationToken ct)
     {
         current.RequireRole(OrgRole.Admin);
-        await EnsureConnectionAsync(input.ConnectionId, ct);
-        var repo = new Repository(current.RequireOrgId(), input.ConnectionId, input.Name, input.Url, input.DefaultBranch, clock.UtcNow);
+        var projectId = await projects.ForRepositoryAsync(input.ProjectId, ct);
+        await EnsureConnectionAsync(input.ConnectionId, projectId, ct);
+        var repo = new Repository(current.RequireOrgId(), projectId, input.ConnectionId, input.Name, input.Url, input.DefaultBranch, clock.UtcNow);
         if (await db.Repositories.AnyAsync(r => r.Url == repo.Url, ct))
             throw new DomainException("This repository was already added.");
         // fail early with a clear message when the URL or credentials are wrong
@@ -49,9 +52,11 @@ public sealed class RepositoryService(
     public async Task<RepositoryDto> UpdateAsync(Guid id, RepositoryInput input, CancellationToken ct)
     {
         current.RequireRole(OrgRole.Admin);
-        await EnsureConnectionAsync(input.ConnectionId, ct);
         var repo = await FindAsync(id, ct);
+        var projectId = input.ProjectId is null ? repo.ProjectId : (await projects.CheckAsync(input.ProjectId, ct))!.Value;
+        await EnsureConnectionAsync(input.ConnectionId, projectId, ct);
         repo.Update(input.ConnectionId, input.Name, input.Url, input.DefaultBranch);
+        if (projectId != repo.ProjectId) await MoveAsync(repo, projectId, ct);
         await db.SaveChangesAsync(ct);
         return await GetAsync(id, ct);
     }
@@ -123,7 +128,8 @@ public sealed class RepositoryService(
                 throw new DomainException($"'{r.Path}' is not a runner file (expected {Repository.RunnersFolder}/<name>.yml).");
             if (await db.Pipelines.AnyAsync(p => p.RepositoryId == id && p.TaskfilePath == path, ct)) continue;
             var name = string.IsNullOrWhiteSpace(r.Name) ? Pipeline.NameFromFile(path) : r.Name.Trim();
-            if (await db.Pipelines.AnyAsync(p => p.Name == name, ct) || db.Pipelines.Local.Any(p => p.Name == name && p.OrgId == repo.OrgId))
+            if (await db.Pipelines.AnyAsync(p => p.Name == name && p.ProjectId == repo.ProjectId, ct)
+                || db.Pipelines.Local.Any(p => p.Name == name && p.ProjectId == repo.ProjectId))
                 name = $"{repo.Name}-{name}";
             var runner = new Pipeline(repo, name, path, r.EntryTask, clock.UtcNow);
             db.Pipelines.Add(runner);
@@ -140,13 +146,29 @@ public sealed class RepositoryService(
     private async Task<Repository> FindAsync(Guid id, CancellationToken ct) =>
         await db.Repositories.FirstOrDefaultAsync(r => r.Id == id, ct) ?? throw new NotFoundException("Repository");
 
-    private async Task EnsureConnectionAsync(Guid? connectionId, CancellationToken ct)
+    private async Task EnsureConnectionAsync(Guid? connectionId, Guid projectId, CancellationToken ct)
     {
-        if (connectionId is { } cid && !await db.Connections.AnyAsync(c => c.Id == cid, ct))
-            throw new NotFoundException("Connection");
+        if (connectionId is not { } cid) return;
+        var c = await db.Connections.AsNoTracking().FirstOrDefaultAsync(c => c.Id == cid, ct) ?? throw new NotFoundException("Connection");
+        if (c.ProjectId is { } owner && owner != projectId)
+            throw new DomainException($"Connection '{c.Name}' belongs to another project; share it or use one of this project.");
+    }
+
+    /// <summary>Moves a repository with its runners, builds and deployments to another project.</summary>
+    private async Task MoveAsync(Repository repo, Guid projectId, CancellationToken ct)
+    {
+        var runners = await db.Pipelines.Where(p => p.RepositoryId == repo.Id).ToListAsync(ct);
+        var names = runners.Select(r => r.Name).ToList();
+        var clash = await db.Pipelines.Where(p => p.ProjectId == projectId && names.Contains(p.Name)).Select(p => p.Name).FirstOrDefaultAsync(ct);
+        if (clash is not null) throw new DomainException($"The project already has a runner named '{clash}'; rename one first.");
+        repo.MoveTo(projectId);
+        foreach (var r in runners) r.MovedTo(projectId);
+        var ids = runners.Select(r => r.Id).ToList();
+        await db.Builds.Where(b => ids.Contains(b.PipelineId)).ExecuteUpdateAsync(u => u.SetProperty(b => b.ProjectId, projectId), ct);
+        await db.Deployments.Where(d => ids.Contains(d.PipelineId)).ExecuteUpdateAsync(u => u.SetProperty(d => d.ProjectId, projectId), ct);
     }
 
     private static RepositoryDto ToDto(Repository r, Dictionary<Guid, string> connections, int runners) => new(
         r.Id, r.Name, r.Url, r.ConnectionId, r.ConnectionId is { } c ? connections.GetValueOrDefault(c) : null,
-        r.DefaultBranch, runners, r.CreatedAt);
+        r.DefaultBranch, runners, r.CreatedAt, r.ProjectId);
 }

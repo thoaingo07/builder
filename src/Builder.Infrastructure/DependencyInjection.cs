@@ -42,6 +42,7 @@ public static class DependencyInjection
         services.Configure<AzureOptions>(config.GetSection("Azure"));
         services.AddHttpClient<IEntraTokens, EntraTokens>(c => c.Timeout = TimeSpan.FromSeconds(30));
         services.AddHttpClient<IAcrTokens, AcrTokens>(c => c.Timeout = TimeSpan.FromSeconds(30));
+        services.AddHttpClient<IRegistryLogins, RegistryLogins>(c => c.Timeout = TimeSpan.FromSeconds(20));
         return services;
     }
 }

@@ -27,6 +27,7 @@ public interface IAppDbContext
     DbSet<Organization> Organizations { get; }
     DbSet<Membership> Memberships { get; }
     DbSet<Repository> Repositories { get; }
+    DbSet<Domain.Projects.Project> Projects { get; }
     DbSet<Domain.Secrets.Secret> Secrets { get; }
     DbSet<Domain.Triggers.RunnerSchedule> RunnerSchedules { get; }
     Task<int> SaveChangesAsync(CancellationToken ct = default);
@@ -108,6 +109,8 @@ public interface IAgentGateway
     Task<bool> CleanupAsync(Guid agentId, CleanupRequest request, CancellationToken ct);
     Task<bool> TeardownAsync(Guid agentId, TeardownRequest request, CancellationToken ct);
     Task ReleaseBuildAsync(Guid agentId, Guid buildId, CancellationToken ct);
+    /// <summary>Null when the agent is gone or did not answer in time.</summary>
+    Task<EnvironmentTestResult?> TestEnvironmentAsync(Guid agentId, EnvironmentTestRequest request, CancellationToken ct);
 }
 
 /// <summary>Live updates for the UI; organization-wide events only reach that organization's members.</summary>
@@ -227,6 +230,12 @@ public interface IEntraTokens
 }
 
 /// <summary>Azure Container Registry: exchanges an Entra (ARM) token for a registry refresh token (~3 h) usable with docker login.</summary>
+/// <summary>Checks registry credentials (user name + access token) like docker login; returns a message, throws when refused.</summary>
+public interface IRegistryLogins
+{
+    Task<string> CheckAsync(string registry, string username, string token, CancellationToken ct);
+}
+
 public interface IAcrTokens
 {
     public const string DockerUser = "00000000-0000-0000-0000-000000000000";

@@ -19,13 +19,13 @@ public static class Mapping
 
     public static BuildSummaryDto ToSummary(this Build b, string pipelineName) => new(
         b.Id, b.PipelineId, pipelineName, b.Number, b.Branch, b.Commit, b.EntryTask, b.Status, b.RequestedBy, b.Error,
-        b.QueuedAt, b.StartedAt, b.FinishedAt, Counts(b.Jobs), b.Reason, b.PullRequestId);
+        b.QueuedAt, b.StartedAt, b.FinishedAt, Counts(b.Jobs), b.Reason, b.PullRequestId, b.ProjectId);
 
     public static BuildDetailDto ToDetail(this Build b, string pipelineName, List<ArtifactDto> artifacts,
         List<DeploymentDto> deployments) => new(
         b.Id, b.PipelineId, pipelineName, b.Number, b.Branch, b.Commit, b.EntryTask, b.Status, b.RequestedBy, b.Error,
         b.QueuedAt, b.StartedAt, b.FinishedAt, Counts(b.Jobs), b.Variables,
-        b.Jobs.OrderBy(j => j.Order).Select(j => j.ToDto()).ToList(), artifacts, deployments, b.Reason, b.PullRequestId, b.SourceRef);
+        b.Jobs.OrderBy(j => j.Order).Select(j => j.ToDto()).ToList(), artifacts, deployments, b.Reason, b.PullRequestId, b.SourceRef, b.ProjectId);
 
     public static JobDto ToDto(this BuildJob j) => new(
         j.Id, j.BuildId, j.Key, j.TaskName, j.Description, j.Order, j.DependsOn, j.Labels, j.Artifacts, j.Secrets, j.Status,
@@ -43,12 +43,12 @@ public static class Mapping
     public static EnvironmentDto ToDto(this DeployEnvironment e) => new(
         e.Id, e.Name, e.Type, e.RequiresApproval, e.Approvers, e.AgentLabels, e.Host, e.Port, e.Username,
         e.PrivateKeyProtected is not null, e.KubeconfigProtected is not null, e.AksTenantId, e.AksClientId,
-        e.AksClientSecretProtected is not null, e.AksSubscriptionId, e.AksResourceGroup, e.AksClusterName, e.AksAdmin);
+        e.AksClientSecretProtected is not null, e.AksSubscriptionId, e.AksResourceGroup, e.AksClusterName, e.AksAdmin, e.ProjectId);
 
     public static DeploymentDto ToDto(this Deployment d, string pipelineName) => new(
         d.Id, d.EnvironmentId, d.EnvironmentName, d.PipelineId, pipelineName, d.BuildId, d.BuildNumber, d.JobId,
-        d.Name, d.Url, d.Status, d.Output, d.CreatedAt, d.UpdatedAt, d.Container is not null);
+        d.Name, d.Url, d.Status, d.Output, d.CreatedAt, d.UpdatedAt, d.Container is not null, d.ProjectId);
 
     public static ConnectionDto ToDto(this GitConnection c) =>
-        new(c.Id, c.Name, c.Type, c.Url, c.Username, c.TokenProtected is not null, c.AuthKind, c.TenantId, c.ClientId);
+        new(c.Id, c.Name, c.Type, c.Url, c.Username, c.TokenProtected is not null, c.AuthKind, c.TenantId, c.ClientId, c.ProjectId);
 }

@@ -76,7 +76,7 @@ public class StepTests
     {
         var job = new BuildJob("j", "j", null, 0, [], null, null, null, true, null, null,
             steps: [new(0, StepKind.Command, "a", null), new(1, StepKind.Command, "b", null), new(2, StepKind.Command, "c", null)]);
-        var build = Build.Queue(Guid.NewGuid(), Guid.NewGuid(), 1, "main", null, null, "me", Now);
+        var build = Build.Queue(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "main", null, null, "me", Now);
         build.Planned("abc", "j", [job], Now);
         job.AssignTo(Guid.NewGuid(), "agent");
         build.JobStarted(job.Id, Now);

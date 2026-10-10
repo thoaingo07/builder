@@ -72,13 +72,14 @@ public sealed class DatabaseTests(AspireFixture aspire) : IAsyncLifetime
 
         // and a full aggregate round-trips
         var org = new Builder.Domain.Organizations.Organization("Acme", "admin", Now);
-        var connection = new GitConnection(org.Id, "azdo", ConnectionType.AzureDevOps, "https://dev.azure.com/org", Now);
-        var repository = new Builder.Domain.Repositories.Repository(org.Id, connection.Id, null, "https://dev.azure.com/org/p/_git/shop", "main", Now);
+        var project = new Builder.Domain.Projects.Project(org.Id, "Shop", null, Now);
+        var connection = new GitConnection(org.Id, null, "azdo", ConnectionType.AzureDevOps, "https://dev.azure.com/org", Now);
+        var repository = new Builder.Domain.Repositories.Repository(org.Id, project.Id, connection.Id, null, "https://dev.azure.com/org/p/_git/shop", "main", Now);
         var pipeline = new Pipeline(repository, "ci", ".builder/runners/ci.yml", "ci", Now);
-        var build = Build.Queue(org.Id, pipeline.Id, pipeline.NextBuildNumber(), "main", null, new() { ["X"] = "1" }, "admin", Now);
+        var build = Build.Queue(org.Id, pipeline.ProjectId, pipeline.Id, pipeline.NextBuildNumber(), "main", null, new() { ["X"] = "1" }, "admin", Now);
         var user = new User("admin", "Admin", "hash", true, Now);
-        db.AddRange(org, connection, repository, pipeline, build, new Agent(null, "agent-1", Now), new Agent(org.Id, "agent-1", Now), user,
-            new DeployEnvironment(org.Id, "prod", EnvironmentType.SshDocker, Now),
+        db.AddRange(org, project, connection, repository, pipeline, build, new Agent(null, "agent-1", Now), new Agent(org.Id, "agent-1", Now), user,
+            new DeployEnvironment(org.Id, null, "prod", EnvironmentType.SshDocker, Now),
             new Builder.Domain.Organizations.Membership(org.Id, user.Id, Builder.Domain.Organizations.OrgRole.Owner, Now));
         await db.SaveChangesAsync();
 
@@ -132,18 +133,20 @@ public sealed class DatabaseTests(AspireFixture aspire) : IAsyncLifetime
         var protector = new Builder.Infrastructure.Services.DataProtectionSecretProtector(
             Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create("tests"));
         var org = new Builder.Domain.Organizations.Organization("Acme", "admin", Now);
-        var repo = new Builder.Domain.Repositories.Repository(org.Id, null, null, "/tmp/x.git", "main", Now);
+        var project = new Builder.Domain.Projects.Project(org.Id, "Shop", null, Now);
+        var repo = new Builder.Domain.Repositories.Repository(org.Id, project.Id, null, null, "/tmp/x.git", "main", Now);
         var runner = new Pipeline(repo, "ci", ".builder/runners/ci.yml", null, Now);
-        var build = Build.Queue(org.Id, runner.Id, 1, "main", null, null, "admin", Now);
-        db.AddRange(org, repo, runner, build,
-            new Builder.Domain.Secrets.Secret(org.Id, "TOKEN", protector.Protect("v4lue"), null, "admin", Now),
-            new Builder.Domain.Secrets.Secret(org.Id, "OTHER", protector.Protect("n0t-yours"), null, "admin", Now));
+        var build = Build.Queue(org.Id, runner.ProjectId, runner.Id, 1, "main", null, null, "admin", Now);
+        db.AddRange(org, project, repo, runner, build,
+            new Builder.Domain.Secrets.Secret(org.Id, null, "TOKEN", protector.Protect("v4lue"), null, "admin", Now),
+            new Builder.Domain.Secrets.Secret(org.Id, null, "OTHER", protector.Protect("n0t-yours"), null, "admin", Now));
         await db.SaveChangesAsync();
         build.Planned("abc", "ci", [new BuildJob("ci", "ci", null, 0, [], null, null, null, true, null, null, ["TOKEN"])], Now);
         await db.SaveChangesAsync();
 
         var secrets = new Builder.Application.Services.SecretService(db, new Builder.Infrastructure.Services.SystemClock(),
-            new Builder.Application.Abstractions.CurrentOrg(), protector);
+            new Builder.Application.Abstractions.CurrentOrg(), protector,
+            new Builder.Application.Services.ProjectService(db, new Builder.Infrastructure.Services.SystemClock(), new Builder.Application.Abstractions.CurrentOrg()));
         var job = build.Jobs.Single();
         var agentA = Guid.NewGuid();
         await Assert.ThrowsAsync<Builder.Application.ForbiddenException>(() => secrets.ForJobAsync(agentA, job.Id, default)); // not assigned yet
@@ -182,16 +185,17 @@ public sealed class DatabaseTests(AspireFixture aspire) : IAsyncLifetime
         var protector = new Builder.Infrastructure.Services.DataProtectionSecretProtector(
             Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create("tests"));
         var org = new Builder.Domain.Organizations.Organization("Acme", "admin", Now);
-        var ado = new GitConnection(org.Id, "ado", ConnectionType.AzureDevOps, "https://dev.azure.com/acme", Now);
+        var project = new Builder.Domain.Projects.Project(org.Id, "Shop", null, Now);
+        var ado = new GitConnection(org.Id, null, "ado", ConnectionType.AzureDevOps, "https://dev.azure.com/acme", Now);
         ado.Update("ado", ConnectionType.AzureDevOps, "https://dev.azure.com/acme", null, protector.Protect("ado-secret"));
         ado.UseServicePrincipal("11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222");
-        var azure = new GitConnection(org.Id, "azure-prod", ConnectionType.Azure, "https://management.azure.com", Now);
+        var azure = new GitConnection(org.Id, null, "azure-prod", ConnectionType.Azure, "https://management.azure.com", Now);
         azure.Update("azure-prod", ConnectionType.Azure, "https://management.azure.com", null, protector.Protect("arm-secret"));
         azure.UseServicePrincipal("11111111-1111-1111-1111-111111111111", "33333333-3333-3333-3333-333333333333");
-        var repo = new Builder.Domain.Repositories.Repository(org.Id, ado.Id, null, "https://dev.azure.com/acme/Shop/_git/web", "main", Now);
+        var repo = new Builder.Domain.Repositories.Repository(org.Id, project.Id, ado.Id, null, "https://dev.azure.com/acme/Shop/_git/web", "main", Now);
         var runner = new Pipeline(repo, "ci", ".builder/runners/ci.yml", null, Now);
-        var build = Build.Queue(org.Id, runner.Id, 1, "main", null, null, "admin", Now);
-        db.AddRange(org, ado, azure, repo, runner, build);
+        var build = Build.Queue(org.Id, runner.ProjectId, runner.Id, 1, "main", null, null, "admin", Now);
+        db.AddRange(org, project, ado, azure, repo, runner, build);
         await db.SaveChangesAsync();
         build.Planned("abc", "ci", [new BuildJob("push", "push", null, 0, [], null, null, null, true, null, null, null,
             [new RegistrySpec("shop.azurecr.io", null)], azureArtifacts: true)], Now);
@@ -232,12 +236,13 @@ public sealed class DatabaseTests(AspireFixture aspire) : IAsyncLifetime
         var protector = new Builder.Infrastructure.Services.DataProtectionSecretProtector(
             Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create("tests"));
         var org = new Builder.Domain.Organizations.Organization("Acme", "admin", Now);
-        var hub = new GitConnection(org.Id, "docker hub", ConnectionType.Registry, "https://index.docker.io", Now);
+        var project = new Builder.Domain.Projects.Project(org.Id, "Shop", null, Now);
+        var hub = new GitConnection(org.Id, null, "docker hub", ConnectionType.Registry, "https://index.docker.io", Now);
         hub.Update("docker hub", ConnectionType.Registry, "https://index.docker.io", "acme-ci", protector.Protect("dckr_pat_x"));
-        var repo = new Builder.Domain.Repositories.Repository(org.Id, null, null, "/tmp/x.git", "main", Now);
+        var repo = new Builder.Domain.Repositories.Repository(org.Id, project.Id, null, null, "/tmp/x.git", "main", Now);
         var runner = new Pipeline(repo, "ci", ".builder/runners/ci.yml", null, Now);
-        var build = Build.Queue(org.Id, runner.Id, 1, "main", null, null, "admin", Now);
-        db.AddRange(org, hub, repo, runner, build);
+        var build = Build.Queue(org.Id, runner.ProjectId, runner.Id, 1, "main", null, null, "admin", Now);
+        db.AddRange(org, project, hub, repo, runner, build);
         await db.SaveChangesAsync();
         build.Planned("abc", "ci", [new BuildJob("push", "push", null, 0, [], null, null, null, true, null, null, null,
             [new RegistrySpec("docker.io", null)])], Now);
@@ -252,7 +257,7 @@ public sealed class DatabaseTests(AspireFixture aspire) : IAsyncLifetime
         var login = Assert.Single((await credentials.ForJobAsync(agent, job.Id, default)).Registries);
         Assert.Equal(("docker.io", "acme-ci", "dckr_pat_x"), (login.Server, login.Username, login.Password));
         await Assert.ThrowsAsync<Builder.Domain.DomainException>(() =>
-            credentials.RegistryConnectionAsync(org.Id, new RegistrySpec("ghcr.io", null), default));
+            credentials.RegistryConnectionAsync(org.Id, project.Id, new RegistrySpec("ghcr.io", null), default));
     }
 
     private async Task<List<string>> TablesAsync()

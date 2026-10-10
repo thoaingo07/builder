@@ -5,10 +5,12 @@ namespace Builder.Domain.Deployments;
 public enum EnvironmentType { SshDocker, Kubernetes }
 
 /// <summary>A deploy target. Secret fields hold ciphertext produced by the application's secret protector.</summary>
-public sealed class DeployEnvironment : IOrgScoped
+public sealed class DeployEnvironment : Projects.IProjectScoped
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7();
     public Guid OrgId { get; private set; }
+    /// <summary>Null: shared by the whole organization.</summary>
+    public Guid? ProjectId { get; private set; }
     public string Name { get; private set; } = "";
     public EnvironmentType Type { get; private set; }
     public bool RequiresApproval { get; private set; }
@@ -35,9 +37,10 @@ public sealed class DeployEnvironment : IOrgScoped
 
     private DeployEnvironment() { }
 
-    public DeployEnvironment(Guid orgId, string name, EnvironmentType type, DateTimeOffset now)
+    public DeployEnvironment(Guid orgId, Guid? projectId, string name, EnvironmentType type, DateTimeOffset now)
     {
         OrgId = orgId;
+        ProjectId = projectId;
         Rename(name);
         Type = type;
         CreatedAt = now;
@@ -48,6 +51,9 @@ public sealed class DeployEnvironment : IOrgScoped
         if (string.IsNullOrWhiteSpace(name)) throw new DomainException("Environment name is required.");
         Name = name.Trim();
     }
+
+    /// <summary>Null: shared by the whole organization.</summary>
+    public void MoveTo(Guid? projectId) => ProjectId = projectId;
 
     public void SetPolicy(bool requiresApproval, IEnumerable<string> approvers, IEnumerable<string> agentLabels)
     {
@@ -86,6 +92,7 @@ public sealed class Deployment : IOrgScoped
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7();
     public Guid OrgId { get; private set; }
+    public Guid ProjectId { get; private set; }
     public Guid EnvironmentId { get; private set; }
     public string EnvironmentName { get; private set; } = "";
     public Guid PipelineId { get; private set; }
@@ -107,11 +114,12 @@ public sealed class Deployment : IOrgScoped
 
     private Deployment() { }
 
-    public Deployment(DeployEnvironment env, Guid pipelineId, Guid buildId, int buildNumber, Guid jobId,
+    public Deployment(DeployEnvironment env, Guid projectId, Guid pipelineId, Guid buildId, int buildNumber, Guid jobId,
         string name, string? compose, string? manifests, string? url, DateTimeOffset now, Builds.ContainerDeploy? container = null)
     {
         Container = container;
         OrgId = env.OrgId;
+        ProjectId = projectId;
         EnvironmentId = env.Id;
         EnvironmentName = env.Name;
         PipelineId = pipelineId;

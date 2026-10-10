@@ -178,6 +178,46 @@ public sealed class Deployer(DeployTarget target, DeploySecrets secrets, string 
         return (code, result);
     }
 
+    /// <summary>Checks the credentials: SSH login and the docker CLI on the host, or the Kubernetes API.</summary>
+    public async Task<EnvironmentTestResult> TestAsync(CancellationToken ct)
+    {
+        var lines = new List<string>();
+        void Collect(LogStream _, string l) => lines.Add(l);
+        var log = new JobLog(_ => Task.CompletedTask, [secrets.PrivateKey, secrets.AksClientSecret]);
+        try
+        {
+            await PrepareAsync(log, ct);
+            if (target.Type == DeployTargetType.SshDocker)
+            {
+                const string probe = "echo \"user=$(id -un)\"; docker version --format 'docker={{.Server.Version}}' 2>&1 | tail -1";
+                var code = await ProcessRunner.RunAsync("ssh", [.. SshOptions(), Destination, probe], tempDir, null, Collect, ct);
+                if (code != 0) return new(false, $"SSH to {Destination}:{target.Port} failed: {Last(lines)}");
+                var user = lines.FirstOrDefault(l => l.StartsWith("user="))?[5..];
+                var docker = lines.LastOrDefault(l => l.StartsWith("docker="))?[7..];
+                return string.IsNullOrEmpty(docker)
+                    ? new(false, $"SSH works as {user}, but docker does not: {Last(lines)} (is {user} in the docker group?)")
+                    : new(true, $"SSH works as {user} on {target.Host}; docker {docker}.");
+            }
+            var kube = await ProcessRunner.RunAsync("kubectl", ["get", "--raw", "/version", "--request-timeout=20s"], tempDir,
+                new Dictionary<string, string>(_env), Collect, ct);
+            if (kube != 0) return new(false, $"Kubernetes API: {Last(lines)}");
+            var version = System.Text.RegularExpressions.Regex.Match(string.Join("", lines), "\"gitVersion\":\\s*\"([^\"]+)\"").Groups[1].Value;
+            return new(true, $"Kubernetes API answers (server {version}).");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new(false, ex.Message);
+        }
+        finally
+        {
+            await log.DisposeAsync();
+            Cleanup();
+        }
+    }
+
+    private static string Last(List<string> lines) =>
+        lines.LastOrDefault(l => !string.IsNullOrWhiteSpace(l))?.Trim() ?? "no output";
+
     public async Task<(bool Ok, string Output)> TeardownAsync(CancellationToken ct)
     {
         var lines = new List<string>();

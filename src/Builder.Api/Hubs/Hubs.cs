@@ -112,6 +112,22 @@ public sealed class SignalRAgentGateway(IHubContext<AgentHub> hub, AgentConnecti
 {
     public bool IsConnected(Guid agentId) => connections.Get(agentId) is not null;
 
+    public async Task<EnvironmentTestResult?> TestEnvironmentAsync(Guid agentId, EnvironmentTestRequest request, CancellationToken ct)
+    {
+        if (connections.Get(agentId) is not { } connectionId) return null;
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(90)); // az login + get-credentials can be slow
+            return await hub.Clients.Client(connectionId).InvokeAsync<EnvironmentTestResult>(AgentHubNames.TestEnvironment, request, timeout.Token);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            log.LogWarning(ex, "Agent {Agent} did not answer the environment test", agentId);
+            return null;
+        }
+    }
+
     public async Task<bool> AssignJobAsync(Guid agentId, JobAssignment assignment, CancellationToken ct)
     {
         if (connections.Get(agentId) is not { } connectionId) return false;
