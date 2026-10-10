@@ -89,6 +89,14 @@ secrets over its authenticated connection; the API only answers the agent the jo
 runs, and only with the declared names. The daemon passes them to go-task as variables (`NAME=value` arguments)
 and environment variables, and masks the values (≥ 4 characters) in every log line it ships.
 
+## Agent work folders
+
+Each agent keeps checkouts, job sandboxes and temporary files in its **work folder**: `Agent:WorkDirectory` in its
+own configuration, unless one is set for that agent in Builder (Agents → Work folder…). Builder sends the setting
+when the agent connects and when it changes; the agent creates the folder, checks it can write there, then uses it
+for new jobs (running jobs finish where they are; nothing is moved or deleted) and reports the folder it uses, or
+why it could not switch. Org admins set it for their organization's agents, Builder admins also for shared ones.
+
 ## What daemons keep (nothing)
 
 - **Credentials are fetched, not shipped**: the job message carries no credentials. When a job starts the daemon

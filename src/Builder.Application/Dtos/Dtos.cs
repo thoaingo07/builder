@@ -62,9 +62,11 @@ public sealed record AgentRunningJobDto(Guid BuildId, int BuildNumber, string Pi
 
 public sealed record AgentDto(
     Guid Id, bool Shared, string Name, string HostName, string Os, string Version, int Capacity, List<string> Labels,
-    bool Enabled, bool Online, DateTimeOffset? LastSeenAt, AgentMetricsDto? Metrics, List<AgentRunningJobDto> RunningJobs);
+    bool Enabled, bool Online, DateTimeOffset? LastSeenAt, AgentMetricsDto? Metrics, List<AgentRunningJobDto> RunningJobs,
+    string? WorkDirectory, string? DefaultWorkDirectory, string? EffectiveWorkDirectory, string? WorkDirectoryError);
 
-public sealed record AgentUpdateInput(bool Enabled);
+/// <summary>WorkDirectory: null keeps it, "" goes back to the agent's own default, a path sets it.</summary>
+public sealed record AgentUpdateInput(bool Enabled, string? WorkDirectory = null);
 public sealed record AgentCleanupInput(bool RemoveWorkspaces, bool DockerPrune);
 
 public sealed record EnvironmentDto(

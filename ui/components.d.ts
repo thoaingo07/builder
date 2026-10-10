@@ -15,6 +15,7 @@ declare module 'vue' {
     AgentCard: typeof import('./src/components/AgentCard.vue')['default']
     AgentCleanupModal: typeof import('./src/components/AgentCleanupModal.vue')['default']
     AgentTokenModal: typeof import('./src/components/org/AgentTokenModal.vue')['default']
+    AgentWorkFolderModal: typeof import('./src/components/AgentWorkFolderModal.vue')['default']
     ApprovalBox: typeof import('./src/components/ApprovalBox.vue')['default']
     AppShell: typeof import('./src/components/AppShell.vue')['default']
     BuildsTable: typeof import('./src/components/BuildsTable.vue')['default']

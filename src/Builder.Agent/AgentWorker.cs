@@ -28,6 +28,8 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
         if (JobSandbox.SweepLeftovers(_options.WorkRoot) is > 0 and var swept)
             log.LogInformation("Removed {Count} job sandbox folder(s) left by an earlier run", swept);
         _metrics = new SystemMetrics(_options.WorkRoot);
+        _defaultWorkRoot = _options.WorkRoot;
+        _usedRoots[_defaultWorkRoot] = true;
         _runner = new JobRunner(_options, httpFactory.CreateClient("server"), this, runnerLog);
 
         _hub = new HubConnectionBuilder()
@@ -47,6 +49,7 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
         _hub.On<TeardownRequest>(AgentHubNames.Teardown, request => _ = Task.Run(() => TeardownAsync(request)));
         _hub.On<Guid>(AgentHubNames.ReleaseBuild, ReleaseBuild);
         _hub.On<EnvironmentTestRequest, EnvironmentTestResult>(AgentHubNames.TestEnvironment, TestEnvironmentAsync);
+        _hub.On<AgentSettings, AgentSettingsResult>(AgentHubNames.ApplySettings, ApplySettings);
         _hub.Reconnected += async _ => await RegisterAsync(_stopping.Token);
     }
 
@@ -93,11 +96,54 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
             Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0",
             _options.Capacity, [.. _options.Labels, PlatformLabel],
             ProcessRunner.Exists(_options.TaskBinary), ProcessRunner.Exists("docker"), ProcessRunner.Exists("kubectl"),
-            ProcessRunner.Exists("az"), ProcessRunner.Exists("ssh"), _running.Keys.ToArray());
+            ProcessRunner.Exists("az"), ProcessRunner.Exists("ssh"), _running.Keys.ToArray(), _defaultWorkRoot);
         var welcome = await _hub.InvokeAsync<AgentWelcome>(AgentHubNames.Register, hello, ct);
         foreach (var jobId in welcome.JobsToAbort)
             if (_running.TryGetValue(jobId, out var cts)) cts.Cancel();
         _log.LogInformation("Registered with {Server} as {Name} ({Id})", _options.ServerUrl, hello.Name, welcome.AgentId);
+        await _hub.InvokeAsync(AgentHubNames.SettingsApplied, ApplySettings(welcome.Settings ?? new AgentSettings(null)), ct);
+    }
+
+    private readonly string _defaultWorkRoot;
+    /// <summary>Work folders used since the agent started: checkouts made before a switch are still released there.</summary>
+    private readonly ConcurrentDictionary<string, bool> _usedRoots = new();
+    private readonly Lock _settingsLock = new();
+
+    /// <summary>
+    /// Switches the work folder (Builder's setting, else the configured one) once it can be created and written to.
+    /// Running jobs keep theirs; new jobs use the new one. Nothing is moved or deleted.
+    /// </summary>
+    private AgentSettingsResult ApplySettings(AgentSettings settings)
+    {
+        lock (_settingsLock)
+        {
+            var wanted = settings.WorkDirectory is { Length: > 0 } w ? ExpandHome(w) : _defaultWorkRoot;
+            try
+            {
+                var full = Path.GetFullPath(wanted);
+                Directory.CreateDirectory(full);
+                var probe = Path.Combine(full, $".builder-write-test-{Guid.NewGuid():N}");
+                File.WriteAllText(probe, "ok");
+                File.Delete(probe);
+                if (full != _options.WorkRoot)
+                {
+                    _log.LogInformation("Work folder: {Old} → {New} (new jobs)", _options.WorkRoot, full);
+                    _options.WorkDirectory = full;
+                    _metrics.DiskPath = full;
+                    _usedRoots[full] = true;
+                }
+                return new AgentSettingsResult(full, null);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning("Cannot use work folder {Folder}: {Error}", wanted, ex.Message);
+                return new AgentSettingsResult(_options.WorkRoot, $"Cannot use {wanted}: {ex.Message}");
+            }
+        }
+
+        static string ExpandHome(string p) => p == "~" || p.StartsWith("~/", StringComparison.Ordinal)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), p.TrimStart('~').TrimStart('/'))
+            : p;
     }
 
     private static string PlatformLabel =>
@@ -109,10 +155,10 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
     private void ReleaseBuild(Guid buildId)
     {
         if (_options.KeepWorkspaces || _jobBuilds.Values.Contains(buildId)) return;
-        var dir = new Workspace(_options.WorkRoot, buildId).Root;
         try
         {
-            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+            foreach (var root in _usedRoots.Keys)
+                if (new Workspace(root, buildId).Root is var dir && Directory.Exists(dir)) Directory.Delete(dir, true);
             Workspace.Release(buildId);
             _log.LogInformation("Removed the workspace of build {Build}", buildId);
         }
@@ -192,9 +238,8 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
         {
             if (request.RemoveWorkspaces)
             {
-                var builds = Path.Combine(_options.WorkRoot, "builds");
                 var busy = _running.Keys.ToHashSet();
-                if (Directory.Exists(builds))
+                foreach (var builds in _usedRoots.Keys.Select(r => Path.Combine(r, "builds")).Where(Directory.Exists))
                     foreach (var dir in Directory.GetDirectories(builds))
                     {
                         if (!Guid.TryParseExact(Path.GetFileName(dir), "N", out var buildId)) continue;

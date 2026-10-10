@@ -45,6 +45,7 @@ public sealed class AgentService(
         {
             agent = await db.Agents.IgnoreQueryFilters().FirstOrDefaultAsync(a => a.Name == name && a.OrgId == orgId, ct) ?? AddAgent(name);
             agent.Connected(connectionId, hello.HostName, hello.Os, hello.Version, hello.Capacity, labels, clock.UtcNow);
+            agent.ReportedDefaultWorkDirectory(hello.DefaultWorkDirectory);
 
             // jobs the server thinks run on this agent but the agent no longer knows about
             var orphaned = await db.BuildJobs
@@ -65,7 +66,7 @@ public sealed class AgentService(
         log.LogInformation("Agent {Agent} connected ({Host}, {Os}) labels=[{Labels}]", name, hello.HostName, hello.Os, string.Join(",", agent.Labels));
         scheduler.Wake();
         await PublishAgentsAsync(ct);
-        return new AgentWelcome(agent.Id, abort);
+        return new AgentWelcome(agent.Id, abort, new AgentSettings(agent.WorkDirectory));
 
         Agent AddAgent(string n)
         {
@@ -249,11 +250,20 @@ public sealed class AgentService(
             await ui.AgentsUpdated(orgId, await ListForOrgAsync(orgId, ct));
     }
 
+    /// <summary>Org admins change their organization's agents; Builder admins also the shared ones.</summary>
     public async Task<AgentDto> UpdateAsync(Guid agentId, AgentUpdateInput input, CancellationToken ct)
     {
-        var agent = await OwnAgentAsync(agentId, ct);
+        var agent = await OwnAgentAsync(agentId, ct, sharedForBuilderAdmins: true);
         agent.SetEnabled(input.Enabled);
+        var folderChanged = input.WorkDirectory is not null && (string.IsNullOrWhiteSpace(input.WorkDirectory) ? null : input.WorkDirectory.Trim()) != agent.WorkDirectory;
+        if (input.WorkDirectory is not null) agent.SetWorkDirectory(input.WorkDirectory);
         await db.SaveChangesAsync(ct);
+        // an online agent switches now (new jobs only); an offline one when it connects
+        if (folderChanged && await gateway.ApplySettingsAsync(agentId, new AgentSettings(agent.WorkDirectory), ct) is { } applied)
+        {
+            agent.WorkDirectoryApplied(applied.WorkDirectory, applied.Error);
+            await db.SaveChangesAsync(ct);
+        }
         if (input.Enabled) scheduler.Wake();
         await PublishAgentsAsync(ct);
         return (await ListAsync(ct)).First(a => a.Id == agentId);
@@ -270,15 +280,29 @@ public sealed class AgentService(
     }
 
     /// <summary>An agent the current organization manages (admins only; shared agents are managed by whoever runs them).</summary>
-    private async Task<Agent> OwnAgentAsync(Guid agentId, CancellationToken ct)
+    private async Task<Agent> OwnAgentAsync(Guid agentId, CancellationToken ct, bool sharedForBuilderAdmins = false)
     {
         current.RequireRole(Domain.Organizations.OrgRole.Admin);
         var agent = await db.Agents.FirstOrDefaultAsync(a => a.Id == agentId, ct) ?? throw new NotFoundException("Agent");
-        if (agent.OrgId is null) throw new ForbiddenException("Shared agents are managed by the people who run them.");
+        if (agent.OrgId is null && !(sharedForBuilderAdmins && await IsBuilderAdminAsync(ct)))
+            throw new ForbiddenException("Shared agents are managed by Builder admins (the people who run them).");
         return agent;
     }
 
+    private async Task<bool> IsBuilderAdminAsync(CancellationToken ct) =>
+        current.UserId is { } userId && await db.Users.AnyAsync(u => u.Id == userId && u.IsAdmin, ct);
+
     public IReadOnlyList<AgentMetricsDto> MetricsHistory(Guid agentId) => metrics.History(agentId);
+
+    /// <summary>The agent reports which work folder it uses after applying its settings.</summary>
+    public async Task SettingsAppliedAsync(Guid agentId, AgentSettingsResult result, CancellationToken ct)
+    {
+        var agent = await db.Agents.IgnoreQueryFilters().FirstOrDefaultAsync(a => a.Id == agentId, ct);
+        if (agent is null) return;
+        agent.WorkDirectoryApplied(result.WorkDirectory, result.Error);
+        await db.SaveChangesAsync(ct);
+        await PublishAgentsAsync(ct);
+    }
 
     public async Task<bool> RequestCleanupAsync(Guid agentId, AgentCleanupInput input, CancellationToken ct)
     {

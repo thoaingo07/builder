@@ -18,6 +18,8 @@ public static class AgentHubNames
     public const string GetJobCredentials = nameof(GetJobCredentials);
     public const string GetTeardownCredentials = nameof(GetTeardownCredentials);
     public const string TeardownCompleted = nameof(TeardownCompleted);
+    /// <summary>The agent applied the settings from <see cref="AgentWelcome"/> (after connecting).</summary>
+    public const string SettingsApplied = nameof(SettingsApplied);
 
     // server → agent
     public const string AssignJob = nameof(AssignJob);
@@ -28,6 +30,8 @@ public static class AgentHubNames
     public const string ReleaseBuild = nameof(ReleaseBuild);
     /// <summary>Check an environment's credentials (SSH login + docker, or the Kubernetes API); returns <see cref="EnvironmentTestResult"/>.</summary>
     public const string TestEnvironment = nameof(TestEnvironment);
+    /// <summary>New settings from the UI; returns <see cref="AgentSettingsResult"/>.</summary>
+    public const string ApplySettings = nameof(ApplySettings);
 }
 
 public sealed record AgentHello(
@@ -42,9 +46,17 @@ public sealed record AgentHello(
     bool HasKubectl,
     bool HasAz,
     bool HasSsh,
-    Guid[] RunningJobIds);
+    Guid[] RunningJobIds,
+    /// <summary>The work folder from the agent's own configuration (absolute), used when Builder sets none.</summary>
+    string? DefaultWorkDirectory = null);
 
-public sealed record AgentWelcome(Guid AgentId, Guid[] JobsToAbort);
+public sealed record AgentWelcome(Guid AgentId, Guid[] JobsToAbort, AgentSettings? Settings = null);
+
+/// <summary>Settings Builder keeps per agent. WorkDirectory null: the agent's own default.</summary>
+public sealed record AgentSettings(string? WorkDirectory);
+
+/// <summary>The work folder the agent uses now, and why it could not switch (null when it did).</summary>
+public sealed record AgentSettingsResult(string WorkDirectory, string? Error);
 
 public sealed record AgentMetrics(
     double CpuPercent,

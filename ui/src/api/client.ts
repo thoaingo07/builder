@@ -163,6 +163,8 @@ export const api = {
   agents: {
     list: () => get<AgentDto[]>('/api/agents'),
     setEnabled: (id: Guid, enabled: boolean) => put<AgentDto>(`/api/agents/${id}`, { enabled }),
+    /** '' = back to the agent's own default */
+    setWorkDirectory: (a: AgentDto, workDirectory: string) => put<AgentDto>(`/api/agents/${a.id}`, { enabled: a.enabled, workDirectory }),
     remove: (id: Guid) => del(`/api/agents/${id}`),
     metrics: (id: Guid) => get<AgentMetricsDto[]>(`/api/agents/${id}/metrics`),
     cleanup: (id: Guid, removeWorkspaces: boolean, dockerPrune: boolean) =>

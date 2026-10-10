@@ -5,6 +5,9 @@ namespace Builder.Agent;
 /// <summary>CPU / memory / disk usage. Linux reads /proc; other systems report what .NET exposes.</summary>
 public sealed class SystemMetrics(string diskPath)
 {
+    /// <summary>A path on the disk to report (the work folder; changes when Builder moves it).</summary>
+    public string DiskPath { get; set; } = diskPath;
+
     private (long Idle, long Total)? _lastCpu;
 
     public double CpuPercent()
@@ -40,10 +43,10 @@ public sealed class SystemMetrics(string diskPath)
     {
         try
         {
-            var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(diskPath)) ?? "/");
+            var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(DiskPath)) ?? "/");
             // statfs of the mount the work directory lives on
             var mount = DriveInfo.GetDrives()
-                .Where(d => d.IsReady && Path.GetFullPath(diskPath).StartsWith(d.RootDirectory.FullName, StringComparison.Ordinal))
+                .Where(d => d.IsReady && Path.GetFullPath(DiskPath).StartsWith(d.RootDirectory.FullName, StringComparison.Ordinal))
                 .OrderByDescending(d => d.RootDirectory.FullName.Length).FirstOrDefault() ?? drive;
             return (mount.TotalSize, mount.TotalSize - mount.AvailableFreeSpace);
         }
