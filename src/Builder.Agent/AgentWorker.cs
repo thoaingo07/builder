@@ -228,8 +228,8 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
             {
                 var secrets = await _hub.InvokeAsync<DeploySecrets>(AgentHubNames.GetTeardownCredentials, request.DeploymentId);
                 var deployer = new Deployer(request.Target, secrets, temp, _options.WorkRoot);
-                var (ok, output) = await deployer.TeardownAsync(_stopping.Token);
-                result = new TeardownResult(request.DeploymentId, ok, output);
+                var (ok, output) = await deployer.ActionAsync(request.Action, _stopping.Token);
+                result = new TeardownResult(request.DeploymentId, ok, output, request.Action);
             }
             finally
             {
@@ -238,7 +238,7 @@ public sealed class AgentWorker : BackgroundService, IServerChannel
         }
         catch (Exception ex)
         {
-            result = new TeardownResult(request.DeploymentId, false, ex.Message);
+            result = new TeardownResult(request.DeploymentId, false, ex.Message, request.Action);
         }
         await _hub.InvokeAsync(AgentHubNames.TeardownCompleted, result);
     }

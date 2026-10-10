@@ -101,7 +101,27 @@ public sealed record DeployTarget(
     string? Project,
     string? Manifests,
     string? Namespace,
-    string? Url);
+    string? Url,
+    ContainerTarget? Container = null);
+
+public enum ContainerStrategyKind { BlueGreen, Recreate }
+
+/// <summary>A container deployment on an SSH host (see the agent's deploy script).</summary>
+public sealed record ContainerTarget(
+    ContainerStrategyKind Strategy,
+    string Service,
+    string Image,
+    string Network,
+    string? EnvFile,
+    string[] Args,
+    string? HealthPath,
+    int? HealthPort,
+    string HealthScheme,
+    int TimeoutSeconds,
+    int Keep,
+    string[]? Command = null);
+
+public enum DeploymentAction { Teardown, Rollback }
 
 public sealed record JobAssignment(
     Guid JobId,
@@ -124,6 +144,6 @@ public sealed record CleanupRequest(Guid RequestId, Guid[] KeepBuildIds, bool Re
 
 public sealed record CleanupResult(Guid RequestId, long FreedBytes, string Output);
 
-public sealed record TeardownRequest(Guid DeploymentId, DeployTarget Target);
+public sealed record TeardownRequest(Guid DeploymentId, DeployTarget Target, DeploymentAction Action = DeploymentAction.Teardown);
 
-public sealed record TeardownResult(Guid DeploymentId, bool Succeeded, string Output);
+public sealed record TeardownResult(Guid DeploymentId, bool Succeeded, string Output, DeploymentAction Action = DeploymentAction.Teardown);

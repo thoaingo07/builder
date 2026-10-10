@@ -29,6 +29,8 @@ public sealed class ConnectionService(
         var c = new GitConnection(current.RequireOrgId(), input.Name, input.Type, Normalize(input.Type, input.Url), clock.UtcNow);
         c.Update(input.Name, input.Type, Normalize(input.Type, input.Url), input.Username, Protect(input.Token));
         ApplyAuth(c, input);
+        if (c.Type == ConnectionType.Registry && string.IsNullOrWhiteSpace(c.Username))
+            throw new DomainException("A container registry connection needs the user name (Docker Hub: your Docker ID).");
         if (c.Type != ConnectionType.Git && c.TokenProtected is null)
             throw new DomainException(c.AuthKind == ConnectionAuthKind.ServicePrincipal
                 ? "A service principal connection needs its client secret."
@@ -62,6 +64,8 @@ public sealed class ConnectionService(
     public async Task<ConnectionTestDto> TestAsync(Guid id, CancellationToken ct)
     {
         var c = await FindAsync(id, ct);
+        if (c.Type == ConnectionType.Registry)
+            return new ConnectionTestDto(true, $"Saved. The token is checked by docker login when a job uses x-registries: [{CredentialService.RegistryHost(c.Url)}].");
         if (c.Type == ConnectionType.Azure)
         {
             var arm = await remotes.ArmTokenAsync(c, ct);

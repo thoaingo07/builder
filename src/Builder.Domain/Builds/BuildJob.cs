@@ -26,7 +26,28 @@ public sealed record DeploySpec(
     string? Project,
     string? Manifests,
     string? Namespace,
-    string? Url);
+    string? Url,
+    ContainerDeploy? Container = null);
+
+public enum ContainerStrategy { BlueGreen, Recreate }
+
+/// <summary>
+/// Run one container on an SSH host and switch traffic to it once healthy (x-deploy with strategy blue-green or
+/// recreate). Traffic reaches it through the network alias <see cref="Service"/> (e.g. Caddy → portal-web:8006).
+/// </summary>
+public sealed record ContainerDeploy(
+    ContainerStrategy Strategy,
+    string Service,
+    string Image,
+    string Network,
+    string? EnvFile,
+    List<string> Args,
+    string? HealthPath,
+    int? HealthPort,
+    string HealthScheme,
+    int TimeoutSeconds,
+    int Keep,
+    List<string>? Command = null);
 
 public sealed class BuildJob
 {

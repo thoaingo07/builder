@@ -224,6 +224,37 @@ public sealed class DatabaseTests(AspireFixture aspire) : IAsyncLifetime
         Assert.Equal("ado-secret", pat.AzureDevOpsToken);
     }
 
+    [Fact]
+    public async Task Docker_hub_logins_come_from_a_registry_connection()
+    {
+        using (var migrator = new DatabaseMigrator(_connectionString)) migrator.Up();
+        await using var db = Db();
+        var protector = new Builder.Infrastructure.Services.DataProtectionSecretProtector(
+            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create("tests"));
+        var org = new Builder.Domain.Organizations.Organization("Acme", "admin", Now);
+        var hub = new GitConnection(org.Id, "docker hub", ConnectionType.Registry, "https://index.docker.io", Now);
+        hub.Update("docker hub", ConnectionType.Registry, "https://index.docker.io", "acme-ci", protector.Protect("dckr_pat_x"));
+        var repo = new Builder.Domain.Repositories.Repository(org.Id, null, null, "/tmp/x.git", "main", Now);
+        var runner = new Pipeline(repo, "ci", ".builder/runners/ci.yml", null, Now);
+        var build = Build.Queue(org.Id, runner.Id, 1, "main", null, null, "admin", Now);
+        db.AddRange(org, hub, repo, runner, build);
+        await db.SaveChangesAsync();
+        build.Planned("abc", "ci", [new BuildJob("push", "push", null, 0, [], null, null, null, true, null, null, null,
+            [new RegistrySpec("docker.io", null)])], Now);
+        await db.SaveChangesAsync();
+        var job = build.Jobs.Single();
+        var agent = Guid.NewGuid();
+        job.AssignTo(agent, "agent-1");
+        await db.SaveChangesAsync();
+
+        var credentials = new Builder.Application.Services.CredentialService(db,
+            new Builder.Application.Services.GitRemotes(db, protector, new FakeEntra()), new FakeAcr(), protector);
+        var login = Assert.Single((await credentials.ForJobAsync(agent, job.Id, default)).Registries);
+        Assert.Equal(("docker.io", "acme-ci", "dckr_pat_x"), (login.Server, login.Username, login.Password));
+        await Assert.ThrowsAsync<Builder.Domain.DomainException>(() =>
+            credentials.RegistryConnectionAsync(org.Id, new RegistrySpec("ghcr.io", null), default));
+    }
+
     private async Task<List<string>> TablesAsync()
     {
         await using var c = new NpgsqlConnection(_connectionString);

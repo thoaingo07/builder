@@ -129,6 +129,7 @@ public static class Endpoints
         api.MapGet("/deployments", (Guid? environmentId, bool? active, DeploymentService s, CancellationToken ct) =>
             s.ListAsync(environmentId, active ?? false, ct));
         api.MapPost("/deployments/{id:guid}/destroy", (Guid id, DeploymentService s, CancellationToken ct) => s.DestroyAsync(id, ct));
+        api.MapPost("/deployments/{id:guid}/rollback", (Guid id, DeploymentService s, CancellationToken ct) => s.RollbackAsync(id, ct));
 
         // connections (Azure DevOps first: test, projects, repositories, branches)
         api.MapGet("/connections", (ConnectionService s, CancellationToken ct) => s.ListAsync(ct));

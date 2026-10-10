@@ -86,6 +86,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ICurren
         m.Entity<Deployment>(e => e.ToTable("deployments"));
 
         m.Entity<GitConnection>(e => e.ToTable("connections"));
+        m.Entity<Deployment>().Property(x => x.Container).HasJsonConversion();
 
         m.Entity<User>(e => e.ToTable("users"));
 

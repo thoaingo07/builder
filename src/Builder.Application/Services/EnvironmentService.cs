@@ -1,3 +1,4 @@
+using Builder.Contracts;
 using Builder.Application.Abstractions;
 using Builder.Application.Dtos;
 using Builder.Domain;
@@ -75,23 +76,31 @@ public sealed class DeploymentService(
         return items.Select(d => d.ToDto(names.GetValueOrDefault(d.PipelineId, "?"))).ToList();
     }
 
-    public async Task<DeploymentDto> DestroyAsync(Guid id, CancellationToken ct)
+    public Task<DeploymentDto> DestroyAsync(Guid id, CancellationToken ct) => ActAsync(id, DeploymentAction.Teardown, ct);
+
+    /// <summary>Blue-green / recreate deployments: make the previous (kept) container live again.</summary>
+    public Task<DeploymentDto> RollbackAsync(Guid id, CancellationToken ct) => ActAsync(id, DeploymentAction.Rollback, ct);
+
+    private async Task<DeploymentDto> ActAsync(Guid id, DeploymentAction action, CancellationToken ct)
     {
         var d = await db.Deployments.FirstOrDefaultAsync(x => x.Id == id, ct) ?? throw new NotFoundException("Deployment");
         var env = await db.Environments.AsNoTracking().FirstOrDefaultAsync(e => e.Id == d.EnvironmentId, ct)
             ?? throw new DomainException("The environment of this deployment no longer exists.");
+        if (action == DeploymentAction.Rollback && d.Container is null)
+            throw new DomainException("Only blue-green / recreate container deployments can be rolled back.");
 
         var required = new List<string>(env.AgentLabels) { env.Type == EnvironmentType.Kubernetes ? "kubectl" : "ssh" };
         var agent = (await db.Agents.AsNoTracking().Where(a => a.Online && a.Enabled).ToListAsync(ct))
             .FirstOrDefault(a => gateway.IsConnected(a.Id) && a.Serves(d.OrgId) && a.Matches(required))
-            ?? throw new DomainException($"No online agent with labels [{string.Join(", ", required)}] can tear this deployment down.");
+            ?? throw new DomainException($"No online agent with labels [{string.Join(", ", required)}] can reach this environment.");
 
-        d.Destroying(agent.Id, clock.UtcNow);
+        if (action == DeploymentAction.Rollback) d.RollingBack(agent.Id, clock.UtcNow);
+        else d.Destroying(agent.Id, clock.UtcNow);
         await db.SaveChangesAsync(ct);
 
-        var target = scheduler.ToTarget(env, new DeploySpec(env.Name, d.Compose, d.Name, d.Manifests, d.Name, d.Url), null)
+        var target = scheduler.ToTarget(env, new DeploySpec(env.Name, d.Compose, d.Name, d.Manifests, d.Name, d.Url, d.Container), null)
             with { Project = d.Name, Namespace = d.Name };
-        await gateway.TeardownAsync(agent.Id, new Contracts.TeardownRequest(d.Id, target), ct);
+        await gateway.TeardownAsync(agent.Id, new TeardownRequest(d.Id, target, action), ct);
 
         var name = await db.Pipelines.Where(p => p.Id == d.PipelineId).Select(p => p.Name).FirstOrDefaultAsync(ct) ?? "?";
         var dto = d.ToDto(name);

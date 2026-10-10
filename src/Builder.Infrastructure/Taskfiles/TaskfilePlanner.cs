@@ -165,7 +165,10 @@ public sealed class TaskfilePlanner : ITaskfilePlanner
             var manifests = Scalar(Get(dm, "manifests"));
             if (compose is not null && manifests is not null)
                 throw new TaskfileException($"Task '{name}': x-deploy takes either 'compose' (ssh-docker) or 'manifests' (kubernetes), not both.");
-            deploy = new DeploySpec(env, compose, Scalar(Get(dm, "project")), manifests, Scalar(Get(dm, "namespace")), Scalar(Get(dm, "url")));
+            var container = ContainerDeployOf(name, dm);
+            if (container is not null && (compose is not null || manifests is not null))
+                throw new TaskfileException($"Task '{name}': x-deploy.strategy runs a single container; don't combine it with compose or manifests.");
+            deploy = new DeploySpec(env, compose, Scalar(Get(dm, "project")), manifests, Scalar(Get(dm, "namespace")), Scalar(Get(dm, "url")), container);
         }
 
         var desc = m is null ? null : Scalar(Get(m, "desc")) ?? Scalar(Get(m, "summary"));
@@ -189,6 +192,34 @@ public sealed class TaskfilePlanner : ITaskfilePlanner
 
         return new PlannedJob(key, name, desc, order, deps, vars, labels, artifacts, hasCommands, approval, deploy, secrets, registries, azureArtifacts,
             StepsOf(node), InputsOf(m));
+    }
+
+    /// <summary>x-deploy with <c>strategy: blue-green | recreate</c>: one container behind a network alias.</summary>
+    private static ContainerDeploy? ContainerDeployOf(string task, YamlMappingNode dm)
+    {
+        var strategy = Scalar(Get(dm, "strategy"));
+        if (strategy is null) return null;
+        var kind = strategy.ToLowerInvariant() switch
+        {
+            "blue-green" or "bluegreen" => ContainerStrategy.BlueGreen,
+            "recreate" => ContainerStrategy.Recreate,
+            _ => throw new TaskfileException($"Task '{task}': x-deploy.strategy '{strategy}' is unknown (blue-green or recreate)."),
+        };
+        string Required(string key) => Scalar(Get(dm, key)) is { Length: > 0 } v ? v.Trim()
+            : throw new TaskfileException($"Task '{task}': x-deploy.{key} is required with strategy {strategy}.");
+        var service = Required("service");
+        if (!System.Text.RegularExpressions.Regex.IsMatch(service, "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$"))
+            throw new TaskfileException($"Task '{task}': x-deploy.service '{service}' is not a valid container name.");
+        var health = Get(dm, "health") as YamlMappingNode;
+        var timeout = health is not null && int.TryParse(Scalar(Get(health, "timeout"))?.TrimEnd('s'), out var t) ? t : 120;
+        var port = health is not null && int.TryParse(Scalar(Get(health, "port")), out var hp) ? hp : (int?)null;
+        var path = health is null ? null : Scalar(Get(health, "path"));
+        if (path is not null && port is null)
+            throw new TaskfileException($"Task '{task}': x-deploy.health.path needs health.port.");
+        var keep = int.TryParse(Scalar(Get(dm, "keep")), out var k) ? Math.Clamp(k, 0, 10) : 1;
+        return new ContainerDeploy(kind, service, Required("image"), Required("network"), Scalar(Get(dm, "env-file")),
+            Strings(Get(dm, "args")).ToList(), path, port, (health is null ? null : Scalar(Get(health, "scheme"))) ?? "http",
+            Math.Clamp(timeout, 5, 1800), keep, Strings(Get(dm, "command")).ToList() is { Count: > 0 } command ? command : null);
     }
 
     /// <summary>The task's cmds as steps (shorthand tasks included).</summary>

@@ -15,3 +15,4 @@ namespace Builder.Migrations;
 [Migration(6, "teardown_agent")] public sealed class M000006 : SqlFileMigration;
 [Migration(7, "job_steps")] public sealed class M000007 : SqlFileMigration;
 [Migration(8, "triggers")] public sealed class M000008 : SqlFileMigration;
+[Migration(9, "container_deployments")] public sealed class M000009 : SqlFileMigration;

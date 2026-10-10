@@ -2,7 +2,7 @@ using Builder.Domain.Organizations;
 
 namespace Builder.Domain.Connections;
 
-public enum ConnectionType { AzureDevOps, Git, Azure }
+public enum ConnectionType { AzureDevOps, Git, Azure, Registry }
 
 /// <summary>Pat: a stored token. ServicePrincipal: Entra client credentials; the API mints short-lived tokens.</summary>
 public enum ConnectionAuthKind { Pat, ServicePrincipal }
@@ -48,7 +48,7 @@ public sealed class GitConnection : IOrgScoped
     /// <summary>Use an Entra service principal (client credentials) instead of a PAT.</summary>
     public void UseServicePrincipal(string tenantId, string clientId)
     {
-        if (Type == ConnectionType.Git) throw new DomainException("Plain git connections use a token.");
+        if (Type is ConnectionType.Git or ConnectionType.Registry) throw new DomainException("Plain git and container registry connections use a token.");
         if (!Guid.TryParse(tenantId, out _) && !tenantId.Contains('.'))
             throw new DomainException("Tenant must be the directory (tenant) id or its domain.");
         if (!Guid.TryParse(clientId, out _)) throw new DomainException("Client id must be the application (client) id GUID.");

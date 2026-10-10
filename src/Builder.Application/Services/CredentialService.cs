@@ -43,6 +43,14 @@ public sealed class CredentialService(IAppDbContext db, GitRemotes remotes, IAcr
         var registries = new List<RegistryLogin>();
         foreach (var spec in job.Registries)
         {
+            if (!IsAzureContainerRegistry(spec.Registry))
+            {
+                // Docker Hub, GHCR, …: the registry connection's user name + access token
+                var registry = await RegistryConnectionAsync(build.OrgId, spec, ct);
+                registries.Add(new RegistryLogin(spec.Registry, registry.Username ?? "",
+                    protector.Unprotect(registry.TokenProtected ?? throw new DomainException($"Connection '{registry.Name}' has no token."))));
+                continue;
+            }
             var azure = await AzureConnectionAsync(build.OrgId, spec, ct);
             var arm = await remotes.ArmTokenAsync(azure, ct);
             var refresh = await acr.ExchangeAsync(spec.Registry, azure.TenantId!, arm.Token, ct);
@@ -68,8 +76,9 @@ public sealed class CredentialService(IAppDbContext db, GitRemotes remotes, IAcr
     public async Task<DeploySecrets> ForTeardownAsync(Guid agentId, Guid deploymentId, CancellationToken ct)
     {
         var d = await db.Deployments.AsNoTracking().IgnoreQueryFilters().FirstOrDefaultAsync(x => x.Id == deploymentId, ct);
-        if (d is null || d.TeardownAgentId != agentId || d.Status != Domain.Deployments.DeploymentStatus.Destroying)
-            throw new ForbiddenException("This agent is not tearing that deployment down.");
+        if (d is null || d.TeardownAgentId != agentId
+            || d.Status is not (Domain.Deployments.DeploymentStatus.Destroying or Domain.Deployments.DeploymentStatus.RollingBack))
+            throw new ForbiddenException("This agent is not tearing down or rolling back that deployment.");
         var env = await db.Environments.AsNoTracking().IgnoreQueryFilters().FirstOrDefaultAsync(e => e.Id == d.EnvironmentId, ct)
             ?? throw new DomainException("The environment of this deployment no longer exists.");
         return Reveal(env);
@@ -94,6 +103,25 @@ public sealed class CredentialService(IAppDbContext db, GitRemotes remotes, IAcr
             0 => throw new DomainException($"Registry {spec.Registry}: add an Azure connection (service principal with AcrPush) first."),
             _ => throw new DomainException($"Registry {spec.Registry}: several Azure connections exist; name one (x-registries: [{{ registry: {spec.Registry}, connection: <name> }}])."),
         };
+    }
+
+    /// <summary>The registry connection for a non-Azure registry: the one named, or the one whose URL is that host.</summary>
+    public async Task<GitConnection> RegistryConnectionAsync(Guid orgId, RegistrySpec spec, CancellationToken ct)
+    {
+        var all = await db.Connections.AsNoTracking().IgnoreQueryFilters()
+            .Where(c => c.OrgId == orgId && c.Type == ConnectionType.Registry).ToListAsync(ct);
+        var match = spec.Connection is { } name
+            ? all.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase))
+            : all.FirstOrDefault(c => string.Equals(RegistryHost(c.Url), spec.Registry, StringComparison.OrdinalIgnoreCase));
+        return match ?? throw new DomainException(
+            $"Registry {spec.Registry}: add a Container registry connection for it (user name + access token).");
+    }
+
+    /// <summary>docker.io, index.docker.io and registry-1.docker.io are the same registry.</summary>
+    public static string RegistryHost(string url)
+    {
+        var host = Uri.TryCreate(url.Contains("://") ? url : "https://" + url, UriKind.Absolute, out var u) ? u.Host : url;
+        return host is "index.docker.io" or "registry-1.docker.io" or "hub.docker.com" ? "docker.io" : host.ToLowerInvariant();
     }
 
     public static bool IsAzureContainerRegistry(string host) =>

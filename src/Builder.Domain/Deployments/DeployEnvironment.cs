@@ -80,7 +80,7 @@ public sealed class DeployEnvironment : IOrgScoped
     }
 }
 
-public enum DeploymentStatus { Deploying, Active, Failed, Destroying, Destroyed }
+public enum DeploymentStatus { Deploying, Active, Failed, Destroying, Destroyed, Superseded, RollingBack, RolledBack }
 
 public sealed class Deployment : IOrgScoped
 {
@@ -96,6 +96,8 @@ public sealed class Deployment : IOrgScoped
     public string? Compose { get; private set; }
     public string? Manifests { get; private set; }
     public string? Url { get; private set; }
+    /// <summary>Settings of a blue-green / recreate container deployment (null for compose / kubernetes).</summary>
+    public Builds.ContainerDeploy? Container { get; private set; }
     public DeploymentStatus Status { get; private set; } = DeploymentStatus.Deploying;
     public string? Output { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
@@ -106,8 +108,9 @@ public sealed class Deployment : IOrgScoped
     private Deployment() { }
 
     public Deployment(DeployEnvironment env, Guid pipelineId, Guid buildId, int buildNumber, Guid jobId,
-        string name, string? compose, string? manifests, string? url, DateTimeOffset now)
+        string name, string? compose, string? manifests, string? url, DateTimeOffset now, Builds.ContainerDeploy? container = null)
     {
+        Container = container;
         OrgId = env.OrgId;
         EnvironmentId = env.Id;
         EnvironmentName = env.Name;
@@ -129,10 +132,35 @@ public sealed class Deployment : IOrgScoped
     }
 
     /// <summary>A newer deployment of the same app to the same environment replaced this one.</summary>
+    /// <summary>A newer deployment took over; for container deployments this one is kept (stopped) for rollback.</summary>
     public void Superseded(DateTimeOffset now)
     {
-        Status = DeploymentStatus.Destroyed;
+        Status = DeploymentStatus.Superseded;
         Output = "Superseded by a newer deployment";
+        UpdatedAt = now;
+    }
+
+    public void RollingBack(Guid agentId, DateTimeOffset now)
+    {
+        if (Status != DeploymentStatus.Active) throw new DomainException("Only the active deployment can be rolled back.");
+        Status = DeploymentStatus.RollingBack;
+        TeardownAgentId = agentId;
+        UpdatedAt = now;
+    }
+
+    /// <summary>Rollback finished: on success this deployment is rolled back; on failure it stays active.</summary>
+    public void RollbackFinished(bool succeeded, string output, DateTimeOffset now)
+    {
+        Status = succeeded ? DeploymentStatus.RolledBack : DeploymentStatus.Active;
+        Output = output;
+        UpdatedAt = now;
+    }
+
+    /// <summary>The previous deployment is live again after a rollback.</summary>
+    public void Reactivated(DateTimeOffset now)
+    {
+        Status = DeploymentStatus.Active;
+        Output = "Live again after a rollback";
         UpdatedAt = now;
     }
 

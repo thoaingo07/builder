@@ -133,10 +133,12 @@ public sealed class SchedulerService(
         e.Name, e.Host, e.Port, e.Username,
         e.AksTenantId, e.AksClientId,
         e.AksSubscriptionId, e.AksResourceGroup, e.AksClusterName, e.AksAdmin,
-        spec.Compose, DeploymentName(spec, build), spec.Manifests, DeploymentName(spec, build), spec.Url);
+        spec.Compose, DeploymentName(spec, build), spec.Manifests, DeploymentName(spec, build), spec.Url,
+        spec.Container is { } c ? new ContainerTarget((ContainerStrategyKind)c.Strategy, c.Service, c.Image, c.Network, c.EnvFile,
+            c.Args.ToArray(), c.HealthPath, c.HealthPort, c.HealthScheme, c.TimeoutSeconds, c.Keep, c.Command?.ToArray()) : null);
 
     public static string DeploymentName(DeploySpec spec, Build? build) =>
-        Sanitize(spec.Project ?? spec.Namespace ?? $"builder-{build?.PipelineId.ToString()[..8]}");
+        Sanitize(spec.Container?.Service ?? spec.Project ?? spec.Namespace ?? $"builder-{build?.PipelineId.ToString()[..8]}");
 
     private static string Sanitize(string name) =>
         new string(name.ToLowerInvariant().Select(c => char.IsAsciiLetterOrDigit(c) || c == '-' ? c : '-').ToArray()).Trim('-');
@@ -148,7 +150,7 @@ public sealed class SchedulerService(
         if (await db.Deployments.AnyAsync(d => d.JobId == job.Id, ct)) return;
         var env = await db.Environments.AsNoTracking().IgnoreQueryFilters().FirstAsync(e => e.OrgId == build.OrgId && e.Name == spec.Environment, ct);
         db.Deployments.Add(new Deployment(env, build.PipelineId, build.Id, build.Number, job.Id,
-            DeploymentName(spec, build), spec.Compose, spec.Manifests, spec.Url, clock.UtcNow));
+            DeploymentName(spec, build), spec.Compose, spec.Manifests, spec.Url, clock.UtcNow, spec.Container));
     }
 
     private static HashSet<string> Upstream(Build build, BuildJob job)

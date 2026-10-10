@@ -84,8 +84,14 @@ public sealed class Deployer(DeployTarget target, DeploySecrets secrets, string 
         "else echo 'No docker compose / podman-compose on the host' >&2; exit 127; fi; echo \"using $C\"; ";
 
     /// <summary>The built-in deploy: compose over SSH (Docker or Podman host), or kubectl apply. No-op when neither is configured.</summary>
-    public async Task<int> DeployAsync(string sourceDir, JobLog log, CancellationToken ct)
+    public async Task<int> DeployAsync(string sourceDir, JobLog log, CancellationToken ct, IReadOnlyDictionary<string, string>? vars = null)
     {
+        if (target.Type == DeployTargetType.SshDocker && target.Container is { } container)
+        {
+            log.System($"{container.Strategy} deploy of '{container.Service}' to {Destination}");
+            var (code, _) = await RunContainerScriptAsync("deploy", container, vars ?? new Dictionary<string, string>(), log.Write, ct);
+            return code;
+        }
         if (target.Type == DeployTargetType.SshDocker)
         {
             if (target.ComposeFile is null) return 0;
@@ -114,6 +120,62 @@ public sealed class Deployer(DeployTarget target, DeploySecrets secrets, string 
         List<string> apply = ["apply", "-n", ns, "-f", manifests];
         if (Directory.Exists(manifests)) apply.Add("-R");
         return await ProcessRunner.RunAsync("kubectl", apply, sourceDir, env, log.Write, ct);
+    }
+
+    /// <summary>Teardown or rollback of a deployment (container deployments: the deploy script's destroy / rollback).</summary>
+    public async Task<(bool Ok, string Output)> ActionAsync(DeploymentAction action, CancellationToken ct)
+    {
+        if (target.Container is { } container)
+        {
+            var lines = new List<string>();
+            await PrepareAsync(new JobLog(_ => Task.CompletedTask, [secrets.PrivateKey]), ct);
+            try
+            {
+                var (code, _) = await RunContainerScriptAsync(action == DeploymentAction.Rollback ? "rollback" : "destroy", container,
+                    new Dictionary<string, string>(), (_, l) => lines.Add(l), ct);
+                return (code == 0, string.Join("\n", lines.TakeLast(50)));
+            }
+            finally
+            {
+                Cleanup();
+            }
+        }
+        if (action == DeploymentAction.Rollback) return (false, "Rollback is only available for blue-green / recreate container deployments.");
+        return await TeardownAsync(ct);
+    }
+
+    /// <summary>Runs the embedded deploy-container.sh on the host over SSH, with the inputs prepended as shell variables.</summary>
+    private async Task<(int Code, string? Result)> RunContainerScriptAsync(string mode, ContainerTarget c, IReadOnlyDictionary<string, string> vars,
+        Action<LogStream, string> output, CancellationToken ct)
+    {
+        string Expand(string s) => System.Text.RegularExpressions.Regex.Replace(s, @"\{\{\s*\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}",
+            m => vars.TryGetValue(m.Groups[1].Value, out var v) ? v : m.Value);
+        static string Q(string? s) => "'" + (s ?? "").Replace("'", "'\\''") + "'";
+        var preamble = new System.Text.StringBuilder()
+            .AppendLine($"MODE={Q(mode)}")
+            .AppendLine($"STRATEGY={Q(c.Strategy.ToString())}")
+            .AppendLine($"SERVICE={Q(c.Service)}")
+            .AppendLine($"IMAGE={Q(Expand(c.Image))}")
+            .AppendLine($"NETWORK={Q(c.Network)}")
+            .AppendLine($"ENV_FILE={Q(c.EnvFile is null ? null : Expand(c.EnvFile))}")
+            .AppendLine($"ARGS=({string.Join(' ', c.Args.Select(a => Q(Expand(a))))})")
+            .AppendLine($"CMD=({string.Join(' ', (c.Command ?? []).Select(a => Q(Expand(a))))})")
+            .AppendLine($"HEALTH_PATH={Q(c.HealthPath)}")
+            .AppendLine($"HEALTH_PORT={Q(c.HealthPort?.ToString())}")
+            .AppendLine($"HEALTH_SCHEME={Q(c.HealthScheme)}")
+            .AppendLine($"TIMEOUT={Q(c.TimeoutSeconds.ToString())}")
+            .AppendLine($"KEEP={Q(c.Keep.ToString())}")
+            .AppendLine($"BUILD={Q(vars.GetValueOrDefault("BUILDER_BUILD_NUMBER") ?? "0")}");
+        using var stream = typeof(Deployer).Assembly.GetManifestResourceStream("deploy-container.sh")!;
+        var script = preamble + await new StreamReader(stream).ReadToEndAsync(ct);
+        string? result = null;
+        var code = await ProcessRunner.RunAsync("ssh", [.. SshOptions(), Destination, "bash -s"], tempDir, null,
+            (stream, line) =>
+            {
+                if (line.StartsWith("BUILDER-RESULT ", StringComparison.Ordinal)) result = line;
+                output(stream, line);
+            }, ct, stdin: script);
+        return (code, result);
     }
 
     public async Task<(bool Ok, string Output)> TeardownAsync(CancellationToken ct)

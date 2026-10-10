@@ -100,7 +100,9 @@ public sealed class JobRunner(AgentOptions options, HttpClient http, IServerChan
 
             if (deployer is not null)
             {
-                exit = await deployer.DeployAsync(workspace.Source, log, ct);
+                var deployVars = new Dictionary<string, string>(job.TaskVars);
+                foreach (var (k, v) in env) deployVars[k] = v;
+                exit = await deployer.DeployAsync(workspace.Source, log, ct, deployVars);
                 if (exit != 0) return Fail(log, job, exit, $"Deploy to '{job.Deploy!.EnvironmentName}' failed (exit {exit})");
                 if (job.Deploy!.Url is { } url) log.System($"Deployed: {url}");
             }

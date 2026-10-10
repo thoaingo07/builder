@@ -72,7 +72,7 @@ public sealed class DeployTests(AspireFixture aspire) : IDisposable
             Assert.Equal("build-2", await ReadAppAsync(appUrl));
             var deployments = (await E2E.GetAsync(http, "/api/deployments"))!.AsArray()
                 .Where(d => d!["name"]!.GetValue<string>() == project).ToList();
-            Assert.Equal(["Active", "Destroyed"], deployments.Select(d => d!["status"]!.GetValue<string>()));
+            Assert.Equal(["Active", "Superseded"], deployments.Select(d => d!["status"]!.GetValue<string>()));
 
             // destroy tears the app down on the host
             var active = deployments[0]!["id"]!.GetValue<string>();

@@ -104,9 +104,15 @@ public sealed class BuildPlanningService(
         // registries need an Azure container registry and a resolvable Azure connection; Azure Artifacts an Azure DevOps repo
         foreach (var spec in plan.Jobs.SelectMany(j => j.Registries).DistinctBy(r => (r.Registry, r.Connection)))
         {
-            if (!CredentialService.IsAzureContainerRegistry(spec.Registry))
-                throw new TaskfileException($"x-registries: {spec.Registry} is not an Azure Container Registry (*.azurecr.io); use x-secrets + docker login for other registries.");
-            await credentials.AzureConnectionAsync(orgId, spec, ct);
+            try
+            {
+                if (CredentialService.IsAzureContainerRegistry(spec.Registry)) await credentials.AzureConnectionAsync(orgId, spec, ct);
+                else await credentials.RegistryConnectionAsync(orgId, spec, ct);
+            }
+            catch (Domain.DomainException ex)
+            {
+                throw new TaskfileException(ex.Message);
+            }
         }
         if (plan.Jobs.Any(j => j.AzureArtifacts) && !await RepositoryUsesAzureDevOpsAsync(orgId, repositoryId, ct))
             throw new TaskfileException("x-azure-artifacts needs the repository to be added with an Azure DevOps connection.");

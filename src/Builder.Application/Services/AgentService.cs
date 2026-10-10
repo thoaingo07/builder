@@ -192,9 +192,30 @@ public sealed class AgentService(
 
     public async Task TeardownCompletedAsync(TeardownResult result, CancellationToken ct)
     {
-        var d = await db.Deployments.FirstOrDefaultAsync(x => x.Id == result.DeploymentId, ct);
+        var d = await db.Deployments.IgnoreQueryFilters().FirstOrDefaultAsync(x => x.Id == result.DeploymentId, ct);
         if (d is null) return;
-        d.Destroyed(result.Succeeded, result.Output, clock.UtcNow);
+        if (result.Action == DeploymentAction.Rollback)
+        {
+            d.RollbackFinished(result.Succeeded, result.Output, clock.UtcNow);
+            if (result.Succeeded)
+            {
+                // the most recent superseded deployment of the same service is live again
+                var previous = await db.Deployments.IgnoreQueryFilters()
+                    .Where(x => x.Id != d.Id && x.EnvironmentId == d.EnvironmentId && x.Name == d.Name && x.Status == Domain.Deployments.DeploymentStatus.Superseded)
+                    .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+                previous?.Reactivated(clock.UtcNow);
+                if (previous is not null)
+                {
+                    var pname = await db.Pipelines.IgnoreQueryFilters().Where(p => p.Id == previous.PipelineId).Select(p => p.Name).FirstOrDefaultAsync(ct) ?? "?";
+                    await db.SaveChangesAsync(ct);
+                    await ui.DeploymentUpdated(previous.OrgId, previous.ToDto(pname));
+                }
+            }
+        }
+        else
+        {
+            d.Destroyed(result.Succeeded, result.Output, clock.UtcNow);
+        }
         await db.SaveChangesAsync(ct);
         var name = await db.Pipelines.Where(p => p.Id == d.PipelineId).Select(p => p.Name).FirstOrDefaultAsync(ct) ?? "?";
         await ui.DeploymentUpdated(d.OrgId, d.ToDto(name));
