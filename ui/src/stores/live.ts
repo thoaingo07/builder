@@ -3,6 +3,7 @@ import { ref, shallowRef } from 'vue'
 import { HubConnectionBuilder, HubConnectionState, LogLevel, type HubConnection } from '@microsoft/signalr'
 import type { AgentDto, AgentMetricsDto, BuildSummaryDto, DeploymentDto, Guid, JobDto, LogLineDto } from '@/api/types'
 import { api } from '@/api/client'
+import { useProjectStore } from './project'
 
 type Handler<T extends unknown[]> = (...args: T) => void
 
@@ -64,10 +65,12 @@ export const useLiveStore = defineStore('live', () => {
       .build()
 
     conn.on('AgentsUpdated', (list: AgentDto[]) => setAgents(list))
-    conn.on('BuildUpdated', (b: BuildSummaryDto) => buildUpdated.emit(b))
+    // pages only see their project's builds/deployments when one is selected
+    const inScope = (projectId: string | null | undefined) => useProjectStore().matches(projectId)
+    conn.on('BuildUpdated', (b: BuildSummaryDto) => { if (inScope(b.projectId)) buildUpdated.emit(b) })
     conn.on('JobUpdated', (j: JobDto) => jobUpdated.emit(j))
     conn.on('Log', (buildId: Guid, lines: LogLineDto[]) => log.emit(buildId, lines))
-    conn.on('DeploymentUpdated', (d: DeploymentDto) => deploymentUpdated.emit(d))
+    conn.on('DeploymentUpdated', (d: DeploymentDto) => { if (inScope(d.projectId)) deploymentUpdated.emit(d) })
 
     conn.onreconnecting(() => { state.value = 'reconnecting' })
     conn.onreconnected(async () => {

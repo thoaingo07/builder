@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ProjectBadge from '@/components/ProjectBadge.vue'
+import { useProjectStore } from '@/stores/project'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
 import { api } from '@/api/client'
@@ -13,6 +15,7 @@ import StatusBadge from '@/components/StatusBadge.vue'
 import DataList from '@/components/DataList.vue'
 
 const live = useLiveStore()
+const project = useProjectStore()
 const notify = useNotify()
 const now = useNow(10000)
 const actions = useBuildActions()
@@ -39,7 +42,7 @@ const columns: TableColumn<DeploymentDto>[] = [
 async function load() {
   loading.value = true
   try {
-    deployments.value = await api.deployments.list({ environmentId: environmentId.value === ALL ? null : environmentId.value, active: activeOnly.value })
+    deployments.value = await api.deployments.list({ environmentId: environmentId.value === ALL ? null : environmentId.value, active: activeOnly.value, project: project.query })
   } catch (e) { notify.error(e, 'Could not load deployments') } finally { loading.value = false }
 }
 watch([environmentId, activeOnly], load)
@@ -57,7 +60,7 @@ async function destroy(d: DeploymentDto) {
 let off: (() => void) | undefined
 onMounted(() => {
   void load()
-  void api.environments.list().then(r => { environments.value = r }).catch(() => undefined)
+  void api.environments.list(project.query).then(r => { environments.value = r }).catch(() => undefined)
   off = live.onDeployment(d => {
     if (environmentId.value !== ALL && d.environmentId !== environmentId.value) return
     if (activeOnly.value && isDeploymentGone(d.status)) deployments.value = deployments.value.filter(x => x.id !== d.id)
@@ -95,6 +98,7 @@ onBeforeUnmount(() => off?.())
                 <StatusBadge :status="d.status" size="sm" />
                 <span class="font-mono font-medium text-highlighted">{{ d.name }}</span>
                 <span class="text-xs text-muted">· {{ d.environmentName }}</span>
+                <ProjectBadge :project-id="d.projectId" />
               </div>
               <a v-if="d.url" :href="d.url" target="_blank" rel="noopener" class="block truncate text-xs text-primary" :title="d.url" @click.stop>{{ d.url }}</a>
               <div class="text-xs text-muted">
@@ -117,7 +121,10 @@ onBeforeUnmount(() => off?.())
           </template>
           <template #status-cell="{ row }"><StatusBadge :status="row.original.status" size="sm" /></template>
           <template #name-cell="{ row }">
-            <div class="font-mono font-medium text-highlighted">{{ row.original.name }}</div>
+            <div class="flex items-center gap-1.5">
+              <span class="font-mono font-medium text-highlighted">{{ row.original.name }}</span>
+              <ProjectBadge :project-id="row.original.projectId" />
+            </div>
             <a v-if="row.original.url" :href="row.original.url" target="_blank" rel="noopener" class="text-xs text-primary hover:underline" @click.stop>{{ row.original.url }}</a>
             <pre v-if="expanded === row.original.id && row.original.output" class="mt-2 max-w-xl overflow-x-auto rounded bg-elevated p-2 text-xs whitespace-pre-wrap">{{ row.original.output }}</pre>
           </template>

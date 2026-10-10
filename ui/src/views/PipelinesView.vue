@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ProjectBadge from '@/components/ProjectBadge.vue'
+import { useProjectStore } from '@/stores/project'
 import NavAction from '@/components/NavAction.vue'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -22,6 +24,7 @@ import { useHighlight } from '@/composables/useHighlight'
 
 // "Runners": each one is a mapped runner file (.builder/runners/*.yml) in a repository.
 const router = useRouter()
+const project = useProjectStore()
 const live = useLiveStore()
 const org = useOrgStore()
 const notify = useNotify()
@@ -69,7 +72,7 @@ const columns: TableColumn<PipelineDto>[] = [
 
 async function load() {
   try {
-    runners.value = await api.pipelines.list()
+    runners.value = await api.pipelines.list(project.query)
     void loadTriggers()
   } catch (e) { notify.error(e, 'Could not load runners') } finally { loading.value = false }
 }
@@ -138,6 +141,7 @@ onBeforeUnmount(() => off?.())
               <div class="flex items-start gap-2">
                 <div class="min-w-0 flex-1">
                   <RouterLink :to="`/pipelines/${r.id}/editor`" class="font-medium text-highlighted">{{ r.name }}</RouterLink>
+                  <ProjectBadge :project-id="r.projectId" class="ml-1.5" />
                   <div class="truncate font-mono text-xs text-muted" :title="`${r.repositoryName} · ${r.taskfilePath}`">{{ r.repositoryName }} · {{ r.taskfilePath }}</div>
                 </div>
                 <UButton icon="i-lucide-play" label="Run" size="xs" class="shrink-0" @click="run(r)" />
@@ -166,6 +170,7 @@ onBeforeUnmount(() => off?.())
           </template>
           <template #name-cell="{ row }">
             <RouterLink :to="`/pipelines/${row.original.id}/editor`" class="font-medium text-highlighted hover:text-primary">{{ row.original.name }}</RouterLink>
+            <ProjectBadge :project-id="row.original.projectId" class="ml-1.5" />
             <div v-if="row.original.entryTask" class="font-mono text-xs text-muted">→ {{ row.original.entryTask }}</div>
           </template>
           <template #repo-cell="{ row }">

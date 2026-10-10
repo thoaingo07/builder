@@ -4,8 +4,9 @@ import type { FormError } from '@nuxt/ui'
 import { api } from '@/api/client'
 import type { EnvironmentDto, EnvironmentInput, EnvironmentType } from '@/api/types'
 import { useNotify } from '@/composables/useNotify'
+import ScopeSelect from '@/components/ScopeSelect.vue'
 
-const props = defineProps<{ environment: EnvironmentDto | null }>()
+const props = defineProps<{ environment: EnvironmentDto | null; defaultScope?: string | null }>()
 const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{ saved: [EnvironmentDto] }>()
 const notify = useNotify()
@@ -15,6 +16,7 @@ const blank = () => ({
   host: '', port: 22, username: '', privateKey: '',
   k8sMode: 'kubeconfig' as 'kubeconfig' | 'aks', kubeconfig: '',
   aksTenantId: '', aksClientId: '', aksClientSecret: '', aksSubscriptionId: '', aksResourceGroup: '', aksClusterName: '', aksAdmin: false,
+  projectId: null as string | null,
 })
 const s = reactive(blank())
 const saving = ref(false)
@@ -33,6 +35,7 @@ watch(open, o => {
   if (!o) return
   const e = props.environment
   Object.assign(s, blank())
+  s.projectId = props.defaultScope ?? null
   if (!e) return
   Object.assign(s, {
     name: e.name, type: e.type, requiresApproval: e.requiresApproval, approvers: [...e.approvers], agentLabels: [...e.agentLabels],
@@ -40,6 +43,7 @@ watch(open, o => {
     k8sMode: e.aksClusterName ? 'aks' : 'kubeconfig',
     aksTenantId: e.aksTenantId ?? '', aksClientId: e.aksClientId ?? '', aksSubscriptionId: e.aksSubscriptionId ?? '',
     aksResourceGroup: e.aksResourceGroup ?? '', aksClusterName: e.aksClusterName ?? '', aksAdmin: e.aksAdmin,
+    projectId: e.projectId,
   })
 }, { immediate: true })
 
@@ -77,6 +81,8 @@ async function submit() {
     aksClientSecret: aks ? orNull(s.aksClientSecret) : null, aksSubscriptionId: aks ? orNull(s.aksSubscriptionId) : null,
     aksResourceGroup: aks ? orNull(s.aksResourceGroup) : null, aksClusterName: aks ? orNull(s.aksClusterName) : null,
     aksAdmin: aks && s.aksAdmin,
+    // always send the scope: omitting it on update would make the environment shared
+    projectId: s.projectId,
   }
   try {
     const saved = env.value ? await api.environments.update(env.value.id, input) : await api.environments.create(input)
@@ -95,6 +101,7 @@ async function submit() {
   <UModal v-model:open="open" :title="env ? `Edit ${env.name}` : 'New environment'" description="A deploy target used by x-deploy tasks." :ui="{ content: 'sm:max-w-2xl' }">
     <template #body>
       <UForm id="env-form" :state="s" :validate="validate" class="space-y-5" @submit="submit">
+        <ScopeSelect v-model="s.projectId" />
         <div class="grid gap-4 sm:grid-cols-2">
           <UFormField label="Name" name="name" required help="Referenced as x-deploy.environment">
             <UInput v-model="s.name" class="w-full font-mono" placeholder="staging-vps" />

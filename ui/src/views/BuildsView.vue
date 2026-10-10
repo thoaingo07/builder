@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useProjectStore } from '@/stores/project'
 import NavAction from '@/components/NavAction.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -10,6 +11,7 @@ import { useNotify } from '@/composables/useNotify'
 import BuildsTable from '@/components/BuildsTable.vue'
 
 const route = useRoute()
+const project = useProjectStore()
 const router = useRouter()
 const live = useLiveStore()
 const notify = useNotify()
@@ -34,6 +36,7 @@ async function load() {
       pipelineId: pipelineId.value === ALL ? null : pipelineId.value,
       status: status.value === ALL ? null : (status.value as BuildStatus),
       take: take.value,
+      project: project.query,
     })
   } catch (e) {
     notify.error(e, 'Could not load builds')
@@ -58,7 +61,7 @@ onMounted(async () => {
     if (matches(b)) builds.value = upsert(builds.value, b)
     else builds.value = builds.value.filter(x => x.id !== b.id)
   })
-  try { pipelines.value = await api.pipelines.list() } catch { /* filter falls back to "all" */ }
+  try { pipelines.value = await api.pipelines.list(project.query) } catch { /* filter falls back to "all" */ }
 })
 onBeforeUnmount(() => off?.())
 </script>

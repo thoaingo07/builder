@@ -2,7 +2,7 @@ import type {
   AgentDto, AgentMetricsDto, BuildDetailDto, BuildStatus, BuildSummaryDto, CleanupInput, CleanupResultDto,
   ConnectionDto, ConnectionInput, ConnectionTestDto, DashboardDto, DeploymentDto, EnvironmentDto, EnvironmentInput,
   Guid, JobDto, LogLineDto, MapRunnersInput, MeDto, MemberDto, OrgCreatedDto, OrgDto, OrgRole, PipelineDto,
-  PipelineInput, PipelineTriggersDto, PlanPreviewDto, RunInputsDto, HookSetupDto, ProblemDetails, RemoteRepositoryDto, RepositoryDto, RepositoryInput,
+  PipelineInput, PipelineTriggersDto, ProjectDto, ProjectInput, PlanPreviewDto, RunInputsDto, HookSetupDto, ProblemDetails, RemoteRepositoryDto, RepositoryDto, RepositoryInput,
   RunnerFilesDto, SecretDto, SecretInput, TaskfileDto, UserDto,
 } from './types'
 
@@ -94,11 +94,21 @@ export const api = {
     removeMember: (userId: Guid) => del(`/api/org/members/${userId}`),
   },
 
-  dashboard: () => get<DashboardDto>('/api/dashboard'),
+  dashboard: (project?: Guid | null) => get<DashboardDto>('/api/dashboard', { project }),
+
+  /** Projects group repositories/runners and own connections, environments and secrets. */
+  projects: {
+    list: () => get<ProjectDto[]>('/api/projects'),
+    get: (id: Guid) => get<ProjectDto>(`/api/projects/${id}`),
+    create: (input: ProjectInput) => post<ProjectDto>('/api/projects', input),
+    update: (id: Guid, input: ProjectInput) => put<ProjectDto>(`/api/projects/${id}`, input),
+    /** 409 unless the project is empty */
+    remove: (id: Guid) => del(`/api/projects/${id}`),
+  },
 
   /** Runners (one mapped runner file each); the API path stays /pipelines. */
   pipelines: {
-    list: () => get<PipelineDto[]>('/api/pipelines'),
+    list: (project?: Guid | null) => get<PipelineDto[]>('/api/pipelines', { project }),
     get: (id: Guid) => get<PipelineDto>(`/api/pipelines/${id}`),
     update: (id: Guid, input: PipelineInput) => put<PipelineDto>(`/api/pipelines/${id}`, input),
     remove: (id: Guid) => del(`/api/pipelines/${id}`),
@@ -114,7 +124,7 @@ export const api = {
   },
 
   repositories: {
-    list: () => get<RepositoryDto[]>('/api/repositories'),
+    list: (project?: Guid | null) => get<RepositoryDto[]>('/api/repositories', { project }),
     get: (id: Guid) => get<RepositoryDto>(`/api/repositories/${id}`),
     create: (input: RepositoryInput) => post<RepositoryDto>('/api/repositories', input),
     update: (id: Guid, input: RepositoryInput) => put<RepositoryDto>(`/api/repositories/${id}`, input),
@@ -129,14 +139,15 @@ export const api = {
   },
 
   secrets: {
-    list: () => get<SecretDto[]>('/api/secrets'),
+    /** with a project: its own secrets plus the shared ones */
+    list: (project?: Guid | null) => get<SecretDto[]>('/api/secrets', { project }),
     create: (input: SecretInput) => post<SecretDto>('/api/secrets', input),
     update: (id: Guid, input: SecretInput) => put<SecretDto>(`/api/secrets/${id}`, input),
     remove: (id: Guid) => del(`/api/secrets/${id}`),
   },
 
   builds: {
-    list: (q: { pipelineId?: Guid | null; status?: BuildStatus | '' | null; take?: number } = {}) =>
+    list: (q: { pipelineId?: Guid | null; status?: BuildStatus | '' | null; take?: number; project?: Guid | null } = {}) =>
       get<BuildSummaryDto[]>('/api/builds', { take: 50, ...q }),
     get: (id: Guid) => get<BuildDetailDto>(`/api/builds/${id}`),
     cancel: (id: Guid) => post<BuildSummaryDto>(`/api/builds/${id}/cancel`),
@@ -159,21 +170,25 @@ export const api = {
   },
 
   environments: {
-    list: () => get<EnvironmentDto[]>('/api/environments'),
+    /** with a project: its own environments plus the shared ones */
+    list: (project?: Guid | null) => get<EnvironmentDto[]>('/api/environments', { project }),
+    /** an online agent with the environment's labels tries SSH + docker / the Kubernetes API (up to ~90 s) */
+    test: (id: Guid) => post<ConnectionTestDto>(`/api/environments/${id}/test`),
     create: (input: EnvironmentInput) => post<EnvironmentDto>('/api/environments', input),
     update: (id: Guid, input: EnvironmentInput) => put<EnvironmentDto>(`/api/environments/${id}`, input),
     remove: (id: Guid) => del(`/api/environments/${id}`),
   },
 
   deployments: {
-    list: (q: { environmentId?: Guid | null; active?: boolean } = {}) => get<DeploymentDto[]>('/api/deployments', q),
+    list: (q: { environmentId?: Guid | null; active?: boolean; project?: Guid | null } = {}) => get<DeploymentDto[]>('/api/deployments', q),
     destroy: (id: Guid) => post<DeploymentDto>(`/api/deployments/${id}/destroy`),
     /** the previous (kept) container goes live again; this one is stopped and kept */
     rollback: (id: Guid) => post<DeploymentDto>(`/api/deployments/${id}/rollback`),
   },
 
   connections: {
-    list: () => get<ConnectionDto[]>('/api/connections'),
+    /** with a project: its own connections plus the shared ones */
+    list: (project?: Guid | null) => get<ConnectionDto[]>('/api/connections', { project }),
     create: (input: ConnectionInput) => post<ConnectionDto>('/api/connections', input),
     update: (id: Guid, input: ConnectionInput) => put<ConnectionDto>(`/api/connections/${id}`, input),
     remove: (id: Guid) => del(`/api/connections/${id}`),

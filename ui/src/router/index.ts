@@ -3,6 +3,7 @@ import { setOrgInvalidHandler, setUnauthorizedHandler } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { useLiveStore } from '@/stores/live'
 import { useOrgStore } from '@/stores/org'
+import { useProjectStore } from '@/stores/project'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -26,6 +27,7 @@ export const router = createRouter({
         { path: 'deployments', name: 'deployments', component: () => import('@/views/DeploymentsView.vue') },
         { path: 'connections', name: 'connections', component: () => import('@/views/ConnectionsView.vue') },
         { path: 'secrets', name: 'secrets', component: () => import('@/views/SecretsView.vue') },
+        { path: 'projects', name: 'projects', component: () => import('@/views/ProjectsView.vue') },
         { path: 'settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
         { path: 'cleanup', name: 'cleanup', component: () => import('@/views/CleanupView.vue') },
       ],
@@ -46,6 +48,7 @@ router.beforeEach(async to => {
   }
   if (!org.orgs.length) return to.name === 'onboarding' ? true : { name: 'onboarding' }
   if (to.name === 'onboarding') return { path: '/' }
+  await useProjectStore().ensureLoaded()
 
   const live = useLiveStore()
   void live.joinOrg(org.currentId)

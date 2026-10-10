@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ProjectBadge from './ProjectBadge.vue'
 import { useRouter } from 'vue-router'
 import type { TableColumn } from '@nuxt/ui'
 import type { BuildSummaryDto } from '@/api/types'
@@ -45,6 +46,7 @@ function open(b: BuildSummaryDto) {
           </div>
           <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
             <ReasonBadge :reason="b.reason" :pull-request-id="b.pullRequestId" :by="b.requestedBy" size="xs" />
+            <ProjectBadge :project-id="b.projectId" />
             <span class="flex min-w-0 items-center gap-1"><UIcon name="i-lucide-git-branch" class="shrink-0" /><span class="truncate" :title="b.branch">{{ b.branch }}</span></span>
             <span>{{ relativeTime(b.queuedAt, now) }} · {{ duration(b.startedAt, b.finishedAt, now) }}</span>
           </div>
@@ -70,6 +72,7 @@ function open(b: BuildSummaryDto) {
       <div class="flex items-center gap-2">
         <span class="font-medium text-highlighted">{{ row.original.pipelineName }} <span class="text-muted">#{{ row.original.number }}</span></span>
         <ReasonBadge :reason="row.original.reason" :pull-request-id="row.original.pullRequestId" :by="row.original.requestedBy" size="xs" />
+        <ProjectBadge :project-id="row.original.projectId" />
       </div>
       <div v-if="row.original.error" class="max-w-64 truncate text-xs text-error">{{ row.original.error }}</div>
     </template>
