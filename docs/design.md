@@ -57,6 +57,14 @@ membership check, and background work (scheduler, planner) scopes explicitly by 
 Agents register with their organization's token, or with the system token as **shared** agents that serve every
 organization (an organization's own agents are preferred).
 
+## Projects
+
+An organization's work is grouped in projects (one product, one customer). Repositories belong to one project and
+their runners, builds and deployments with them. Connections, environments and secrets belong to a project or are
+shared by the organization; a runner's names resolve in its project first, then in the shared ones, so two projects
+can each have their own `docker.io` login or `vps` environment while a common one is shared. Agents stay per
+organization (+ the shared pool). Projects are grouping, not a permission boundary: members see every project.
+
 ## Repositories and runners
 
 A repository is added once per organization (Azure DevOps picker: project → repository → branch). Builder lists

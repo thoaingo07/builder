@@ -17,6 +17,20 @@ return 400; with an organization the user is not a member of, 404. Roles: `Membe
 - Admin: + connections, repositories & runner mapping, environments, secrets, agents, members (not owners), cleanup.
 - Owner: + manage owners. An organization always keeps at least one owner.
 
+## Projects
+
+Inside an organization, **projects** group repositories (and so runners, builds, deployments). Connections,
+environments and secrets belong to a project, or are **shared** (`projectId: null`) by the whole organization.
+A name a runner asks for (`x-deploy.environment`, `x-secrets`, `x-registries`) resolves to the project's own
+item first, then to the shared one. List endpoints take `?project=<id>`: repositories, runners, builds,
+deployments and the dashboard show that project only; connections, environments and secrets show the project's
+own plus the shared ones. Without `?project` everything in the organization is listed.
+
+Inputs: `projectId` on `RepositoryInput` (needed once the organization has two or more projects; a PUT with
+another project moves the repository with its runners, builds and deployments), and on `ConnectionInput`,
+`EnvironmentInput`, `SecretInput` (null = shared; on update, send it every time — leaving it out makes the item
+shared). Runner names are unique per project; environment and secret names per scope (a project, or shared).
+
 ## BFF
 
 | Method | Path | Body / result |
@@ -176,10 +190,12 @@ Current organization (`X-Org` required):
 | POST | `/org/members` | `{ email, role }` → `MemberDto` (unknown e-mail = invitation: can sign in with Google) | Admin (Owner to add owners) |
 | PUT | `/org/members/{userId}` | `{ role }` → `MemberDto` | Admin |
 | DELETE | `/org/members/{userId}` | 204 (anyone may remove themselves = leave) | Admin |
-| GET | `/dashboard` | `DashboardDto` | |
+| GET | `/dashboard?project=` | `DashboardDto` (agents are always the organization's) | |
+| GET/POST | `/projects` | `ProjectDto[]` / `{ name, description? }` → `ProjectDto` | /Admin |
+| GET/PUT/DELETE | `/projects/{id}` | `ProjectDto` / `{ name, description? }` → `ProjectDto` / 204 (409 unless empty) | /Admin/Admin |
 | GET/POST | `/connections` | `ConnectionDto[]` / `ConnectionInput` → `ConnectionDto` | /Admin |
 | PUT/DELETE | `/connections/{id}` | `ConnectionInput` → `ConnectionDto` / 204 | Admin |
-| POST | `/connections/{id}/test` | `ConnectionTestDto` | |
+| POST | `/connections/{id}/test` | `ConnectionTestDto` (Azure DevOps: lists projects; Azure: Entra token; Container registry: the docker login handshake) | |
 | GET | `/connections/{id}/projects` | `string[]` (Azure DevOps) | |
 | GET | `/connections/{id}/repositories?project=` | `RemoteRepositoryDto[]` (Azure DevOps) | |
 | GET | `/connections/{id}/branches?url=` | `string[]` (any git URL through this connection) | |
@@ -212,6 +228,7 @@ Current organization (`X-Org` required):
 | GET | `/agents/{id}/metrics` | `AgentMetricsDto[]` | |
 | POST | `/agents/{id}/cleanup` | `{ removeWorkspaces, dockerPrune }` → 202 | Admin |
 | GET/POST, PUT/DELETE | `/environments`, `/environments/{id}` | as before | /Admin |
+| POST | `/environments/{id}/test` | `ConnectionTestDto` — an online agent with the environment's labels checks SSH + docker (or the Kubernetes API); up to ~90 s; 409 when no agent can | Admin |
 | GET | `/deployments?environmentId=&active=true` | `DeploymentDto[]` | |
 | POST | `/deployments/{id}/destroy` | `DeploymentDto` | |
 | POST | `/deployments/{id}/rollback` | `DeploymentDto` (container deployments: the previous container goes live again; RollingBack → RolledBack, the previous deployment → Active) | |
