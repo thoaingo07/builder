@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NavAction from '@/components/NavAction.vue'
 import { onMounted, reactive, ref } from 'vue'
 import type { FormError, TableColumn } from '@nuxt/ui'
 import { api } from '@/api/client'
@@ -8,6 +9,8 @@ import { upsert } from '@/lib/collections'
 import { useOrgStore } from '@/stores/org'
 import { useNotify } from '@/composables/useNotify'
 import { useConfirm } from '@/composables/useConfirm'
+import { useHighlight } from '@/composables/useHighlight'
+import DataList from '@/components/DataList.vue'
 
 const org = useOrgStore()
 const notify = useNotify()
@@ -15,6 +18,7 @@ const confirm = useConfirm()
 
 const NAME = /^[A-Z][A-Z0-9_]*$/
 const secrets = ref<SecretDto[]>([])
+const hl = useHighlight()
 const loading = ref(true)
 const formOpen = ref(false)
 const editing = ref<SecretDto | null>(null)
@@ -53,6 +57,7 @@ async function submit() {
   try {
     const saved = editing.value ? await api.secrets.update(editing.value.id, input) : await api.secrets.create(input)
     secrets.value = upsert(secrets.value, saved, false)
+    void hl.flash(saved.id)
     notify.success(editing.value ? `Updated ${saved.name}` : `Created ${saved.name}`)
     formOpen.value = false
   } catch (e) { notify.error(e, 'Could not save secret') } finally { saving.value = false }
@@ -75,7 +80,7 @@ onMounted(load)
     <template #header>
       <UDashboardNavbar title="Secrets" icon="i-lucide-key-round">
         <template #right>
-          <UButton v-if="org.isAdmin" icon="i-lucide-plus" label="New secret" @click="openForm(null)" />
+          <NavAction v-if="org.isAdmin" icon="i-lucide-plus" label="New secret" @click="openForm(null)" />
         </template>
       </UDashboardNavbar>
     </template>
@@ -95,7 +100,22 @@ onMounted(load)
         :actions="org.isAdmin ? [{ label: 'New secret', icon: 'i-lucide-plus', onClick: () => openForm(null) }] : []"
       />
       <UCard v-else :ui="{ body: 'p-0 sm:p-0' }">
-        <UTable :data="secrets" :columns="columns" :loading="loading" :ui="{ tr: org.isAdmin ? 'cursor-pointer' : '' }" @select="(_e, row) => openForm(row.original)">
+        <DataList :data="secrets" :columns="columns" :loading="loading" :highlight-id="hl.id.value" :clickable="org.isAdmin" @select="openForm">
+          <template #card="{ item: x }">
+            <div class="flex items-start gap-2">
+              <div class="min-w-0 flex-1">
+                <div class="truncate font-mono font-medium text-highlighted">{{ x.name }}</div>
+                <div v-if="x.description" class="truncate text-sm">{{ x.description }}</div>
+                <div class="text-xs text-muted">{{ dateTime(x.updatedAt) }} · {{ x.updatedBy }}</div>
+              </div>
+              <UDropdownMenu
+                v-if="org.isAdmin" :content="{ align: 'end' }"
+                :items="[[{ label: 'Edit', icon: 'i-lucide-pencil', onSelect: () => openForm(x) }], [{ label: 'Delete', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => remove(x) }]]"
+              >
+                <UButton icon="i-lucide-ellipsis-vertical" size="xs" color="neutral" variant="ghost" aria-label="More actions" @click.stop />
+              </UDropdownMenu>
+            </div>
+          </template>
           <template #name-cell="{ row }"><span class="font-mono font-medium text-highlighted">{{ row.original.name }}</span></template>
           <template #description-cell="{ row }"><span class="text-sm" :class="row.original.description ? '' : 'text-dimmed'">{{ row.original.description || '—' }}</span></template>
           <template #updated-cell="{ row }"><span class="text-xs text-muted">{{ dateTime(row.original.updatedAt) }} · {{ row.original.updatedBy }}</span></template>
@@ -105,7 +125,7 @@ onMounted(load)
               <UButton icon="i-lucide-trash-2" size="xs" color="error" variant="ghost" aria-label="Delete" @click="remove(row.original)" />
             </div>
           </template>
-        </UTable>
+        </DataList>
       </UCard>
 
       <UModal v-model:open="formOpen" :title="editing ? `Edit ${editing.name}` : 'New secret'">

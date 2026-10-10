@@ -22,7 +22,7 @@ const saving = ref(false)
 const connection = computed(() => connections.value.find(c => c.id === s.connectionId) ?? null)
 const isAzure = computed(() => connection.value?.type === 'AzureDevOps')
 const connectionItems = computed(() => [
-  ...connections.value.map(c => ({ label: c.name, value: c.id, icon: c.type === 'AzureDevOps' ? 'i-simple-icons-azuredevops' : 'i-lucide-git-fork' })),
+  ...connections.value.map(c => ({ label: c.name, value: c.id, icon: c.type === 'AzureDevOps' ? 'i-lucide-cloud-cog' : 'i-lucide-git-fork' })),
   { label: 'None — public repository', value: NONE, icon: 'i-lucide-globe' },
 ])
 const repoItems = computed(() => remoteRepos.value.map(r => ({ label: r.name, value: r.url })))

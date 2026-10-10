@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef, watch } from 'vue'
+import NavAction from '@/components/NavAction.vue'
+import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue'
 import type { TabsItem } from '@nuxt/ui'
 import { api, ApiError } from '@/api/client'
 import type { PipelineDto, PlanPreviewDto, TriggerSpec } from '@/api/types'
@@ -13,6 +14,7 @@ import TaskGraph from '@/components/graph/TaskGraph.vue'
 import TaskDetails from '@/components/pipelines/TaskDetails.vue'
 import TriggersView from '@/components/pipelines/TriggersView.vue'
 import RunPipelineModal from '@/components/pipelines/RunPipelineModal.vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 
 // Read-only view of a runner file. Builder never writes to repositories: files are changed there.
 const props = defineProps<{ id: string }>()
@@ -31,12 +33,22 @@ const loading = ref(true)
 const loadError = ref<string | null>(null)
 const runOpen = ref(false)
 
-const tab = ref<'visual' | 'yaml'>('visual')
-const tabs: TabsItem[] = [
-  { label: 'Graph', icon: 'i-lucide-workflow', value: 'visual' },
-  { label: 'YAML', icon: 'i-lucide-file-code', value: 'yaml' },
-]
+const mobile = useIsMobile()
+// phones: a task list instead of a zoomed-out graph
+const tab = ref<'visual' | 'list' | 'yaml'>(mobile.value ? 'list' : 'visual')
+const tabs = computed<TabsItem[]>(() => [
+  { label: mobile.value ? undefined : 'Graph', icon: 'i-lucide-workflow', value: 'visual', 'aria-label': 'Graph' },
+  { label: mobile.value ? undefined : 'Tasks', icon: 'i-lucide-list', value: 'list', 'aria-label': 'Tasks' },
+  { label: mobile.value ? undefined : 'YAML', icon: 'i-lucide-file-code', value: 'yaml', 'aria-label': 'YAML' },
+])
 const selected = ref<string | null>(null)
+const aside = ref<HTMLElement | null>(null)
+// phones: the details sit below the list/graph, so bring them into view
+watch(selected, async n => {
+  if (!n || !mobile.value) return
+  await nextTick()
+  aside.value?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+})
 
 // ---------- parsed model ----------
 const EMPTY: tf.TaskfileModel = { version: '3', entry: '', triggers: { push: null, pullRequest: null, schedules: [], error: null }, tasks: [] }
@@ -125,31 +137,31 @@ onMounted(async () => {
 </script>
 
 <template>
-  <UDashboardPanel id="runner-file" :ui="{ body: 'p-0 sm:p-0 gap-0 overflow-hidden' }">
+  <UDashboardPanel id="runner-file" :ui="{ body: 'p-0 sm:p-0 gap-0 max-lg:overflow-y-auto lg:overflow-hidden' }">
     <template #header>
       <UDashboardNavbar :title="pipeline ? `${pipeline.name} · runner file` : 'Runner file'">
         <template #leading>
           <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" to="/pipelines" aria-label="Back to runners" />
         </template>
         <template #right>
-          <UButton v-if="repoLink" :to="repoLink" target="_blank" icon="i-lucide-external-link" label="Open in repository" color="neutral" variant="outline" />
-          <UButton v-if="pipeline" icon="i-lucide-play" label="Run" @click="runOpen = true" />
+          <NavAction v-if="repoLink" :to="repoLink" target="_blank" icon="i-lucide-external-link" label="Open in repository" color="neutral" variant="outline" />
+          <NavAction v-if="pipeline" icon="i-lucide-play" label="Run" @click="runOpen = true" />
         </template>
       </UDashboardNavbar>
       <UDashboardToolbar>
         <template #left>
           <USelectMenu
-            v-if="branches.length" v-model="branch" :items="branches" icon="i-lucide-git-branch" size="sm" class="w-48"
+            v-if="branches.length" v-model="branch" :items="branches" icon="i-lucide-git-branch" size="sm" class="w-36 sm:w-48"
             :create-item="{ position: 'bottom' }" @create="(b: string) => { branches.push(b); branch = b }"
           />
-          <UInput v-else v-model.lazy="branch" icon="i-lucide-git-branch" size="sm" class="w-48" @keydown.enter="load(branch)" />
+          <UInput v-else v-model.lazy="branch" icon="i-lucide-git-branch" size="sm" class="w-36 sm:w-48" @keydown.enter="load(branch)" />
           <UButton icon="i-lucide-refresh-cw" size="sm" color="neutral" variant="ghost" aria-label="Reload from git" :loading="loading" @click="load(branch)" />
-          <span v-if="commit" class="font-mono text-xs text-muted">{{ shortSha(commit) }}</span>
+          <span v-if="commit" class="hidden font-mono text-xs text-muted sm:inline">{{ shortSha(commit) }}</span>
           <span class="hidden font-mono text-xs text-dimmed md:inline">{{ pipeline?.repositoryName }} · {{ pipeline?.taskfilePath }}</span>
         </template>
         <template #right>
           <UTooltip :text="plan?.error ?? parseErrors[0] ?? status.text">
-            <UBadge :color="status.color" variant="subtle" :icon="status.icon" :label="status.text" class="max-w-72 truncate" :ui="{ leadingIcon: planning ? 'animate-spin' : '' }" />
+            <UBadge :color="status.color" variant="subtle" :icon="status.icon" :label="mobile ? undefined : status.text" class="max-w-72 truncate" :ui="{ leadingIcon: planning ? 'animate-spin' : '' }" />
           </UTooltip>
           <UTabs v-model="tab" :items="tabs" :content="false" size="xs" variant="pill" />
         </template>
@@ -182,14 +194,35 @@ onMounted(async () => {
         <UAlert v-if="plan?.error" color="error" variant="subtle" icon="i-lucide-circle-x" class="rounded-none" title="Runner file is invalid" :description="plan.error" />
         <UAlert v-if="parseErrors.length" color="error" variant="subtle" icon="i-lucide-file-x" class="rounded-none" title="YAML syntax error" :description="parseErrors[0]" />
 
-        <div v-show="tab === 'visual'" class="flex min-h-0 flex-1 flex-col lg:flex-row">
-          <div class="relative min-h-[420px] flex-1">
+        <div v-show="tab !== 'yaml'" class="flex min-h-0 flex-1 flex-col lg:flex-row">
+          <ul v-if="tab === 'list'" class="divide-y divide-default lg:flex-1 lg:overflow-y-auto">
+            <li v-for="t in model.tasks" :key="t.name">
+              <button
+                type="button" class="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-elevated/50"
+                :class="[selected === t.name ? 'bg-elevated' : '', reachable.has(t.name) ? '' : 'opacity-50']"
+                @click="selected = selected === t.name ? null : t.name"
+              >
+                <UIcon v-if="t.name === effectiveEntry" name="i-lucide-flag" class="shrink-0 text-primary" />
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate font-mono text-sm font-medium">{{ t.name }}</span>
+                  <span class="block truncate text-xs text-muted">
+                    {{ t.steps.length }} step{{ t.steps.length === 1 ? '' : 's' }}<template v-if="t.deps.length"> · after {{ t.deps.join(', ') }}</template>
+                  </span>
+                </span>
+                <UIcon v-if="t.requires.length" name="i-lucide-text-cursor-input" class="text-info" />
+                <UIcon v-if="t.approval" name="i-lucide-lock" class="text-warning" />
+                <UIcon v-if="t.deploy" name="i-lucide-rocket" class="text-primary" />
+                <UIcon name="i-lucide-chevron-right" class="text-dimmed" />
+              </button>
+            </li>
+          </ul>
+          <div v-else class="relative h-[60vh] min-h-80 flex-1 lg:h-auto lg:min-h-[420px]">
             <div v-if="!model.tasks.length" class="absolute inset-0 flex items-center justify-center">
               <UEmpty icon="i-lucide-workflow" title="No tasks" description="This file defines no tasks." variant="naked" />
             </div>
             <TaskGraph v-else :model="model" :entry="effectiveEntry" :reachable="reachable" :selected="selected" @select="n => (selected = n)" />
           </div>
-          <aside class="max-h-[60vh] w-full overflow-y-auto border-t border-default p-4 lg:max-h-none lg:w-96 lg:border-t-0 lg:border-l">
+          <aside ref="aside" class="w-full border-t border-default p-4 lg:w-96 lg:overflow-y-auto lg:border-t-0 lg:border-l">
             <template v-if="selectedTask">
               <UButton icon="i-lucide-arrow-left" label="Runner overview" size="xs" color="neutral" variant="link" class="mb-3 px-0" @click="selected = null" />
               <TaskDetails :task="selectedTask" :is-entry="selectedTask.name === effectiveEntry" :reachable="reachable.has(selectedTask.name)" @select="n => (selected = n)" />
@@ -203,7 +236,7 @@ onMounted(async () => {
                   <dt class="text-muted">Tasks</dt>
                   <dd>{{ model.tasks.length }} · {{ reachable.size }} run by a build</dd>
                 </dl>
-                <p class="mt-2 text-xs text-muted">Click a task in the graph to see its steps, variables, inputs and Builder settings.</p>
+                <p class="mt-2 text-xs text-muted">Pick a task to see its steps, variables, inputs and Builder settings.</p>
               </div>
               <div class="space-y-2">
                 <h3 class="flex items-center gap-2 font-semibold text-highlighted"><UIcon name="i-lucide-zap" class="text-muted" />Triggers <code class="text-xs font-normal text-muted">x-builder.triggers</code></h3>

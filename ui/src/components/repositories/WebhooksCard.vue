@@ -79,7 +79,7 @@ async function manual() {
       />
       <div class="flex flex-wrap gap-2">
         <UButton
-          v-if="isAzure" icon="i-simple-icons-azuredevops" label="Install in Azure DevOps" :loading="installing" @click="install"
+          v-if="isAzure" icon="i-lucide-cloud-cog" label="Install in Azure DevOps" :loading="installing" @click="install"
         />
         <UButton icon="i-lucide-settings-2" label="Set up manually" color="neutral" variant="outline" :loading="generating" @click="manual" />
       </div>

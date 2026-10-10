@@ -10,6 +10,7 @@ import { useNotify } from '@/composables/useNotify'
 import { useNow } from '@/composables/useNow'
 import { useBuildActions } from '@/composables/useBuildActions'
 import StatusBadge from '@/components/StatusBadge.vue'
+import DataList from '@/components/DataList.vue'
 
 const live = useLiveStore()
 const notify = useNotify()
@@ -71,7 +72,7 @@ onBeforeUnmount(() => off?.())
       </UDashboardNavbar>
       <UDashboardToolbar>
         <template #left>
-          <USelect v-model="environmentId" :items="envItems" class="w-56" icon="i-lucide-cloud" />
+          <USelect v-model="environmentId" :items="envItems" class="w-44 sm:w-56" icon="i-lucide-cloud" />
           <USwitch v-model="activeOnly" label="Active only" />
         </template>
       </UDashboardToolbar>
@@ -79,10 +80,32 @@ onBeforeUnmount(() => off?.())
 
     <template #body>
       <UCard :ui="{ body: 'p-0 sm:p-0' }">
-        <UTable
-          :data="deployments" :columns="columns" :loading="loading" empty="No deployments"
-          :ui="{ tr: 'cursor-pointer' }" @select="(_e, row) => (expanded = expanded === row.original.id ? null : row.original.id)"
+        <DataList
+          :data="deployments" :columns="columns" :loading="loading" empty="No deployments" clickable
+          @select="d => (expanded = expanded === d.id ? null : d.id)"
         >
+          <template #card="{ item: d }">
+            <div class="space-y-1.5">
+              <div class="flex flex-wrap items-center gap-1.5">
+                <StatusBadge :status="d.status" size="sm" />
+                <span class="font-mono font-medium text-highlighted">{{ d.name }}</span>
+                <span class="text-xs text-muted">· {{ d.environmentName }}</span>
+              </div>
+              <a v-if="d.url" :href="d.url" target="_blank" rel="noopener" class="block truncate text-xs text-primary" :title="d.url" @click.stop>{{ d.url }}</a>
+              <div class="text-xs text-muted">
+                <RouterLink :to="`/builds/${d.buildId}`" class="hover:text-primary" @click.stop>{{ d.pipelineName }} #{{ d.buildNumber }}</RouterLink>
+                · {{ relativeTime(d.updatedAt ?? d.createdAt, now) }}
+              </div>
+              <pre v-if="expanded === d.id && d.output" class="overflow-x-auto rounded bg-elevated p-2 text-xs whitespace-pre-wrap">{{ d.output }}</pre>
+              <div class="flex flex-wrap gap-1" @click.stop>
+                <UButton v-if="d.url && d.status === 'Active'" :to="d.url" target="_blank" size="xs" variant="soft" label="Open app" trailing-icon="i-lucide-external-link" />
+                <UButton
+                  v-if="d.status === 'Active' || d.status === 'Failed'" size="xs" color="error" variant="ghost"
+                  icon="i-lucide-trash-2" label="Destroy" :loading="actions.busy.value === `destroy:${d.id}`" @click="destroy(d)"
+                />
+              </div>
+            </div>
+          </template>
           <template #status-cell="{ row }"><StatusBadge :status="row.original.status" size="sm" /></template>
           <template #name-cell="{ row }">
             <div class="font-mono font-medium text-highlighted">{{ row.original.name }}</div>
@@ -107,7 +130,7 @@ onBeforeUnmount(() => off?.())
               />
             </div>
           </template>
-        </UTable>
+        </DataList>
       </UCard>
     </template>
   </UDashboardPanel>

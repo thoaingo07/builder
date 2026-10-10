@@ -30,3 +30,10 @@
 
 .cm-editor { height: 100%; font-size: 12.5px; }
 .cm-editor .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* brief highlight of a just-created/updated row or card (useHighlight) */
+@keyframes hl-flash {
+  0%, 30% { background-color: color-mix(in srgb, var(--ui-primary) 18%, transparent); }
+  100% { background-color: transparent; }
+}
+.hl-flash, .hl-flash > td { animation: hl-flash 2.4s ease-out; }

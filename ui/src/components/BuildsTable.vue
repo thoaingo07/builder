@@ -8,6 +8,7 @@ import { useBuildActions } from '@/composables/useBuildActions'
 import StatusBadge from './StatusBadge.vue'
 import JobProgress from './JobProgress.vue'
 import ReasonBadge from './ReasonBadge.vue'
+import DataList from './DataList.vue'
 
 withDefaults(defineProps<{ builds: BuildSummaryDto[]; loading?: boolean; compact?: boolean; empty?: string }>(), {
   loading: false, compact: false, empty: 'No builds yet',
@@ -28,17 +29,40 @@ const columns: TableColumn<BuildSummaryDto>[] = [
   { id: 'actions', header: '' },
 ]
 
-function open(_e: Event, row: { original: BuildSummaryDto }) {
-  void router.push(`/builds/${row.original.id}`)
+function open(b: BuildSummaryDto) {
+  void router.push(`/builds/${b.id}`)
 }
 </script>
 
 <template>
-  <UTable
-    :data="builds" :columns="columns" :loading="loading" :empty="empty" class="w-full"
-    :ui="{ tr: 'cursor-pointer', td: 'py-2.5' }"
-    @select="open"
-  >
+  <DataList :data="builds" :columns="columns" :loading="loading" :empty="empty" clickable @select="open">
+    <template #card="{ item: b }">
+      <div class="flex items-start gap-2">
+        <div class="min-w-0 flex-1 space-y-1">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <StatusBadge :status="b.status" size="sm" />
+            <span class="truncate font-medium text-highlighted">{{ b.pipelineName }} <span class="text-muted">#{{ b.number }}</span></span>
+          </div>
+          <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+            <ReasonBadge :reason="b.reason" :pull-request-id="b.pullRequestId" :by="b.requestedBy" size="xs" />
+            <span class="flex min-w-0 items-center gap-1"><UIcon name="i-lucide-git-branch" class="shrink-0" /><span class="truncate" :title="b.branch">{{ b.branch }}</span></span>
+            <span>{{ relativeTime(b.queuedAt, now) }} · {{ duration(b.startedAt, b.finishedAt, now) }}</span>
+          </div>
+          <div v-if="b.error" class="truncate text-xs text-error" :title="b.error">{{ b.error }}</div>
+          <JobProgress :counts="b.jobCounts" />
+        </div>
+        <div @click.stop>
+          <UButton
+            v-if="isBuildActive(b.status)" icon="i-lucide-square" color="error" variant="ghost" size="sm" aria-label="Cancel"
+            :loading="actions.busy.value === `cancel:${b.id}`" :disabled="b.status === 'Canceling'" @click="actions.cancel(b)"
+          />
+          <UButton
+            v-else-if="!compact" icon="i-lucide-rotate-ccw" color="neutral" variant="ghost" size="sm" aria-label="Re-run"
+            :loading="actions.busy.value === `rerun:${b.id}`" @click="actions.rerun(b)"
+          />
+        </div>
+      </div>
+    </template>
     <template #status-cell="{ row }">
       <StatusBadge :status="row.original.status" size="sm" />
     </template>
@@ -84,5 +108,5 @@ function open(_e: Event, row: { original: BuildSummaryDto }) {
         </UTooltip>
       </div>
     </template>
-  </UTable>
+  </DataList>
 </template>

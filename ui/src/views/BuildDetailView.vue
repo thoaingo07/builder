@@ -12,6 +12,9 @@ import { useNow } from '@/composables/useNow'
 import { useBuildActions } from '@/composables/useBuildActions'
 import StatusBadge from '@/components/StatusBadge.vue'
 import ReasonBadge from '@/components/ReasonBadge.vue'
+import DataList from '@/components/DataList.vue'
+import NavAction from '@/components/NavAction.vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 import JobProgress from '@/components/JobProgress.vue'
 import JobGraph from '@/components/graph/JobGraph.vue'
 import JobPanel from '@/components/JobPanel.vue'
@@ -28,7 +31,9 @@ const actions = useBuildActions()
 const build = ref<BuildDetailDto | null>(null)
 const loading = ref(true)
 const notFound = ref(false)
-const view = ref<'graph' | 'list'>('graph')
+const mobile = useIsMobile()
+// phones: the list reads better than a zoomed-out graph
+const view = ref<'graph' | 'list'>(mobile.value ? 'list' : 'graph')
 
 const selectedId = computed<string | null>({
   get: () => (typeof route.query.job === 'string' ? route.query.job : null),
@@ -141,15 +146,15 @@ watch(() => props.id, (next, prev) => {
         </template>
         <template #trailing>
           <StatusBadge v-if="build" :status="build.status" />
-          <ReasonBadge v-if="build" :reason="build.reason" :pull-request-id="build.pullRequestId" :by="build.requestedBy" />
+          <span v-if="build" class="max-sm:hidden"><ReasonBadge :reason="build.reason" :pull-request-id="build.pullRequestId" :by="build.requestedBy" /></span>
         </template>
         <template #right>
           <template v-if="build">
-            <UButton
+            <NavAction
               v-if="isBuildActive(build.status)" icon="i-lucide-square" label="Cancel" color="error" variant="outline"
               :disabled="build.status === 'Canceling'" :loading="actions.busy.value === `cancel:${build.id}`" @click="cancel"
             />
-            <UButton
+            <NavAction
               icon="i-lucide-rotate-ccw" label="Re-run" color="neutral" variant="outline"
               :loading="actions.busy.value === `rerun:${build.id}`" @click="actions.rerun(build)"
             />
@@ -195,6 +200,7 @@ watch(() => props.id, (next, prev) => {
             </div>
             <div>
               <div class="text-xs text-muted">Requested by</div>
+              <span class="sm:hidden"><ReasonBadge :reason="build.reason" :pull-request-id="build.pullRequestId" :by="build.requestedBy" size="xs" /></span>
               <div class="text-sm">{{ build.requestedBy }} · <span class="text-muted">{{ relativeTime(build.queuedAt, now) }}</span></div>
             </div>
             <div>
@@ -230,10 +236,30 @@ watch(() => props.id, (next, prev) => {
           <div v-if="!build.jobs.length" class="p-6">
             <UEmpty icon="i-lucide-workflow" :title="build.status === 'Planning' ? 'Planning…' : 'No jobs'" variant="naked" />
           </div>
-          <div v-else-if="view === 'graph'" class="h-[440px]">
+          <div v-else-if="view === 'graph'" class="h-[60vh] min-h-80 md:h-[440px]">
             <JobGraph :jobs="build.jobs" :selected-id="selectedId" @select="id => (selectedId = id)" />
           </div>
-          <UTable v-else :data="sortedJobs" :columns="jobColumns" :ui="{ tr: 'cursor-pointer' }" @select="(_e, row) => (selectedId = row.original.id)">
+          <DataList v-else :data="sortedJobs" :columns="jobColumns" clickable @select="j => (selectedId = j.id)">
+            <template #card="{ item: j }">
+              <div class="flex items-start gap-2">
+                <div class="min-w-0 flex-1 space-y-1">
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <StatusBadge :status="j.status" kind="job" size="sm" />
+                    <span class="truncate font-mono font-medium text-highlighted">{{ j.taskName }}</span>
+                    <UIcon v-if="j.approval" name="i-lucide-lock" class="text-warning" />
+                    <UIcon v-if="j.deploy" name="i-lucide-rocket" class="text-primary" />
+                  </div>
+                  <div class="flex flex-wrap gap-x-2 text-xs text-muted">
+                    <span v-if="j.agentName" class="font-mono">{{ j.agentName }}</span>
+                    <span v-if="j.startedAt" class="tabular-nums">{{ duration(j.startedAt, j.finishedAt, now) }}</span>
+                    <span v-if="j.steps?.length">{{ j.steps.filter(x => x.status === 'Succeeded' || x.status === 'Failed' || x.status === 'Skipped').length }}/{{ j.steps.length }} steps</span>
+                    <span v-if="j.dependsOn.length" class="truncate">after {{ j.dependsOn.join(', ') }}</span>
+                  </div>
+                  <div v-if="j.error && j.status === 'Failed'" class="truncate text-xs text-error" :title="j.error">{{ j.error }}</div>
+                </div>
+                <UIcon name="i-lucide-chevron-right" class="mt-1 shrink-0 text-dimmed" />
+              </div>
+            </template>
             <template #status-cell="{ row }"><StatusBadge :status="row.original.status" size="sm" /></template>
             <template #taskName-cell="{ row }">
               <span class="font-mono font-medium">{{ row.original.taskName }}</span>
@@ -243,12 +269,28 @@ watch(() => props.id, (next, prev) => {
             <template #deps-cell="{ row }"><span class="font-mono text-xs text-muted">{{ row.original.dependsOn.join(', ') || '—' }}</span></template>
             <template #agentName-cell="{ row }"><span class="font-mono text-xs">{{ row.original.agentName ?? '—' }}</span></template>
             <template #duration-cell="{ row }"><span class="tabular-nums">{{ duration(row.original.startedAt, row.original.finishedAt, now) }}</span></template>
-          </UTable>
+          </DataList>
         </UCard>
 
         <UCard v-if="build.deployments.length" :ui="{ header: 'sm:px-4 px-3 py-3', body: 'p-0 sm:p-0' }">
           <template #header><h2 class="font-semibold text-highlighted">Deployments</h2></template>
-          <UTable :data="build.deployments" :columns="deploymentColumns">
+          <DataList :data="build.deployments" :columns="deploymentColumns">
+            <template #card="{ item: d }">
+              <div class="space-y-1.5">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <StatusBadge :status="d.status" size="sm" />
+                  <span class="font-mono font-medium">{{ d.name }}</span>
+                  <span class="text-xs text-muted">· {{ d.environmentName }} · {{ relativeTime(d.updatedAt ?? d.createdAt, now) }}</span>
+                </div>
+                <div class="flex flex-wrap gap-1">
+                  <UButton v-if="d.url && d.status === 'Active'" :to="d.url" target="_blank" size="xs" variant="soft" label="Open app" trailing-icon="i-lucide-external-link" />
+                  <UButton
+                    v-if="d.status === 'Active' || d.status === 'Failed'" size="xs" color="error" variant="ghost"
+                    icon="i-lucide-trash-2" label="Destroy" :loading="actions.busy.value === `destroy:${d.id}`" @click="destroy(d)"
+                  />
+                </div>
+              </div>
+            </template>
             <template #status-cell="{ row }"><StatusBadge :status="row.original.status" size="sm" /></template>
             <template #updated-cell="{ row }"><span class="text-xs text-muted">{{ relativeTime(row.original.updatedAt ?? row.original.createdAt, now) }}</span></template>
             <template #actions-cell="{ row }">
@@ -260,12 +302,19 @@ watch(() => props.id, (next, prev) => {
                 />
               </div>
             </template>
-          </UTable>
+          </DataList>
         </UCard>
 
         <UCard v-if="build.artifacts.length" :ui="{ header: 'sm:px-4 px-3 py-3', body: 'p-0 sm:p-0' }">
           <template #header><h2 class="font-semibold text-highlighted">Artifacts</h2></template>
-          <UTable :data="build.artifacts" :columns="artifactColumns">
+          <DataList :data="build.artifacts" :columns="artifactColumns">
+            <template #card="{ item: a }">
+              <a :href="api.artifactUrl(a.id)" download class="flex items-center gap-2 text-sm">
+                <UIcon name="i-lucide-download" class="shrink-0 text-muted" />
+                <span class="min-w-0 flex-1 truncate" :title="a.name">{{ a.name }}</span>
+                <span class="shrink-0 text-xs text-muted">{{ bytes(a.sizeBytes) }} · {{ jobName(a.jobId) }}</span>
+              </a>
+            </template>
             <template #name-cell="{ row }">
               <a :href="api.artifactUrl(row.original.id)" download class="flex items-center gap-1.5 hover:text-primary">
                 <UIcon name="i-lucide-download" />{{ row.original.name }}
@@ -274,7 +323,7 @@ watch(() => props.id, (next, prev) => {
             <template #job-cell="{ row }"><span class="font-mono text-xs">{{ jobName(row.original.jobId) }}</span></template>
             <template #size-cell="{ row }">{{ bytes(row.original.sizeBytes) }}</template>
             <template #created-cell="{ row }"><span class="text-xs text-muted">{{ dateTime(row.original.createdAt) }}</span></template>
-          </UTable>
+          </DataList>
         </UCard>
       </template>
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NavAction from '@/components/NavAction.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/api/client'
@@ -68,13 +69,13 @@ onBeforeUnmount(() => off?.())
       <UDashboardNavbar title="Builds" icon="i-lucide-hammer">
         <template #right>
           <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" aria-label="Refresh" :loading="loading" @click="load" />
-          <UButton icon="i-lucide-play" label="Run a runner" to="/pipelines" />
+          <NavAction icon="i-lucide-play" label="Run a runner" to="/pipelines" />
         </template>
       </UDashboardNavbar>
       <UDashboardToolbar>
         <template #left>
-          <USelect v-model="pipelineId" :items="pipelineItems" class="w-56" icon="i-lucide-workflow" />
-          <USelect v-model="status" :items="statusItems" class="w-44" icon="i-lucide-filter" />
+          <USelect v-model="pipelineId" :items="pipelineItems" class="w-40 sm:w-56" icon="i-lucide-workflow" />
+          <USelect v-model="status" :items="statusItems" class="w-36 sm:w-44" icon="i-lucide-filter" />
         </template>
       </UDashboardToolbar>
     </template>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NavAction from '@/components/NavAction.vue'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { DropdownMenuItem, TableColumn } from '@nuxt/ui'
@@ -16,6 +17,8 @@ import ReasonBadge from '@/components/ReasonBadge.vue'
 import RunnerEditModal from '@/components/pipelines/RunnerEditModal.vue'
 import RunPipelineModal from '@/components/pipelines/RunPipelineModal.vue'
 import TriggersPanel from '@/components/pipelines/TriggersPanel.vue'
+import DataList from '@/components/DataList.vue'
+import { useHighlight } from '@/composables/useHighlight'
 
 // "Runners": each one is a mapped runner file (.builder/runners/*.yml) in a repository.
 const router = useRouter()
@@ -26,6 +29,8 @@ const confirm = useConfirm()
 const now = useNow(10000)
 
 const runners = ref<PipelineDto[]>([])
+const hl = useHighlight()
+function saved(p: PipelineDto) { runners.value = upsert(runners.value, p, false); void hl.flash(p.id) }
 const loading = ref(true)
 const editOpen = ref(false)
 const runOpen = ref(false)
@@ -115,7 +120,7 @@ onBeforeUnmount(() => off?.())
     <template #header>
       <UDashboardNavbar title="Runners" icon="i-lucide-workflow">
         <template #right>
-          <UButton v-if="org.isAdmin" icon="i-lucide-link-2" label="Map runner files" color="neutral" variant="outline" to="/repositories" />
+          <NavAction v-if="org.isAdmin" icon="i-lucide-link-2" label="Map runner files" color="neutral" variant="outline" to="/repositories" />
         </template>
       </UDashboardNavbar>
     </template>
@@ -127,7 +132,38 @@ onBeforeUnmount(() => off?.())
         :actions="[{ label: 'Repositories', icon: 'i-lucide-folder-git-2', to: '/repositories' }]"
       />
       <UCard v-else :ui="{ body: 'p-0 sm:p-0' }">
-        <UTable :data="runners" :columns="columns" :loading="loading">
+        <DataList :data="runners" :columns="columns" :loading="loading" :highlight-id="hl.id.value">
+          <template #card="{ item: r }">
+            <div class="space-y-1.5">
+              <div class="flex items-start gap-2">
+                <div class="min-w-0 flex-1">
+                  <RouterLink :to="`/pipelines/${r.id}/editor`" class="font-medium text-highlighted">{{ r.name }}</RouterLink>
+                  <div class="truncate font-mono text-xs text-muted" :title="`${r.repositoryName} · ${r.taskfilePath}`">{{ r.repositoryName }} · {{ r.taskfilePath }}</div>
+                </div>
+                <UButton icon="i-lucide-play" label="Run" size="xs" class="shrink-0" @click="run(r)" />
+                <UDropdownMenu :items="menu(r)" :content="{ align: 'end' }">
+                  <UButton icon="i-lucide-ellipsis-vertical" color="neutral" variant="ghost" size="xs" aria-label="More actions" />
+                </UDropdownMenu>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <RouterLink v-if="r.lastBuild" :to="`/builds/${r.lastBuild.id}`" class="flex items-center gap-1.5">
+                  <StatusBadge :status="r.lastBuild.status" size="sm" />
+                  <span class="text-xs text-muted">#{{ r.lastBuild.number }} · {{ relativeTime(r.lastBuild.queuedAt, now) }}</span>
+                </RouterLink>
+                <span v-else class="text-xs text-dimmed">Never run</span>
+                <button type="button" class="ml-auto flex items-center gap-1.5 text-muted" :aria-label="`Triggers of ${r.name}`" @click="openTriggers(r)">
+                  <template v-if="summary(r.id)">
+                    <UBadge v-if="summary(r.id)!.error" icon="i-lucide-circle-alert" label="Invalid triggers" color="error" variant="subtle" size="sm" />
+                    <template v-else>
+                      <UIcon name="i-lucide-git-commit-horizontal" :class="summary(r.id)!.push ? 'text-success' : 'text-dimmed'" />
+                      <UIcon name="i-lucide-git-pull-request" :class="summary(r.id)!.pr ? 'text-success' : 'text-dimmed'" />
+                      <UIcon name="i-lucide-clock" :class="summary(r.id)!.schedules ? 'text-success' : 'text-dimmed'" />
+                    </template>
+                  </template>
+                </button>
+              </div>
+            </div>
+          </template>
           <template #name-cell="{ row }">
             <RouterLink :to="`/pipelines/${row.original.id}/editor`" class="font-medium text-highlighted hover:text-primary">{{ row.original.name }}</RouterLink>
             <div v-if="row.original.entryTask" class="font-mono text-xs text-muted">→ {{ row.original.entryTask }}</div>
@@ -173,10 +209,10 @@ onBeforeUnmount(() => off?.())
               </UDropdownMenu>
             </div>
           </template>
-        </UTable>
+        </DataList>
       </UCard>
 
-      <RunnerEditModal v-model:open="editOpen" :runner="editing" @saved="p => (runners = upsert(runners, p, false))" />
+      <RunnerEditModal v-model:open="editOpen" :runner="editing" @saved="saved" />
       <RunPipelineModal v-model:open="runOpen" :pipeline="running" />
       <USlideover v-model:open="triggersOpen" :title="`Triggers · ${triggersFor?.name ?? ''}`" :description="triggersFor ? `${triggersFor.repositoryName} · ${triggersFor.taskfilePath}` : undefined" :ui="{ content: 'max-w-lg' }">
         <template #body>

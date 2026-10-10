@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NavAction from '@/components/NavAction.vue'
 import { onMounted, ref } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
 import { api } from '@/api/client'
@@ -8,11 +9,15 @@ import { useNotify } from '@/composables/useNotify'
 import { useConfirm } from '@/composables/useConfirm'
 import EnvironmentFormModal from '@/components/environments/EnvironmentFormModal.vue'
 import { useOrgStore } from '@/stores/org'
+import { useHighlight } from '@/composables/useHighlight'
+import DataList from '@/components/DataList.vue'
 
 const org = useOrgStore()
 const notify = useNotify()
 const confirm = useConfirm()
 const envs = ref<EnvironmentDto[]>([])
+const hl = useHighlight()
+function saved(e: EnvironmentDto) { envs.value = upsert(envs.value, e, false); void hl.flash(e.id) }
 const loading = ref(true)
 const formOpen = ref(false)
 const editing = ref<EnvironmentDto | null>(null)
@@ -52,8 +57,8 @@ onMounted(load)
     <template #header>
       <UDashboardNavbar title="Environments" icon="i-lucide-cloud">
         <template #right>
-          <UButton icon="i-lucide-rocket" label="Deployments" color="neutral" variant="outline" to="/deployments" />
-          <UButton v-if="org.isAdmin" icon="i-lucide-plus" label="New environment" @click="create" />
+          <NavAction icon="i-lucide-rocket" label="Deployments" color="neutral" variant="outline" to="/deployments" />
+          <NavAction v-if="org.isAdmin" icon="i-lucide-plus" label="New environment" @click="create" />
         </template>
       </UDashboardNavbar>
     </template>
@@ -65,7 +70,26 @@ onMounted(load)
         :actions="org.isAdmin ? [{ label: 'New environment', icon: 'i-lucide-plus', onClick: create }] : []"
       />
       <UCard v-else :ui="{ body: 'p-0 sm:p-0' }">
-        <UTable :data="envs" :columns="columns" :loading="loading" :ui="{ tr: org.isAdmin ? 'cursor-pointer' : '' }" @select="(_e, row) => edit(row.original)">
+        <DataList :data="envs" :columns="columns" :loading="loading" :highlight-id="hl.id.value" :clickable="org.isAdmin" @select="edit">
+          <template #card="{ item: e }">
+            <div class="flex items-start gap-2">
+              <UIcon :name="e.type === 'SshDocker' ? 'i-lucide-server' : 'i-lucide-ship-wheel'" class="mt-0.5 shrink-0 text-muted" />
+              <div class="min-w-0 flex-1 space-y-1">
+                <div class="font-mono font-medium text-highlighted">{{ e.name }}</div>
+                <div class="truncate font-mono text-xs text-muted" :title="target(e)">{{ e.type === 'SshDocker' ? 'SSH + Compose' : 'Kubernetes' }} · {{ target(e) }}</div>
+                <div v-if="e.requiresApproval || e.agentLabels.length" class="flex flex-wrap gap-1">
+                  <UBadge v-if="e.requiresApproval" icon="i-lucide-lock" color="warning" variant="subtle" size="sm" label="Approval" />
+                  <UBadge v-for="l in e.agentLabels" :key="l" :label="l" color="neutral" variant="outline" size="sm" class="font-mono" />
+                </div>
+              </div>
+              <UDropdownMenu
+                v-if="org.isAdmin" :content="{ align: 'end' }"
+                :items="[[{ label: 'Edit', icon: 'i-lucide-pencil', onSelect: () => edit(e) }], [{ label: 'Delete', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => remove(e) }]]"
+              >
+                <UButton icon="i-lucide-ellipsis-vertical" size="xs" color="neutral" variant="ghost" aria-label="More actions" @click.stop />
+              </UDropdownMenu>
+            </div>
+          </template>
           <template #name-cell="{ row }"><span class="font-mono font-medium text-highlighted">{{ row.original.name }}</span></template>
           <template #type-cell="{ row }">
             <div class="flex items-center gap-2">
@@ -90,9 +114,9 @@ onMounted(load)
               <UButton icon="i-lucide-trash-2" size="xs" color="error" variant="ghost" aria-label="Delete" @click="remove(row.original)" />
             </div>
           </template>
-        </UTable>
+        </DataList>
       </UCard>
-      <EnvironmentFormModal v-model:open="formOpen" :environment="editing" @saved="e => (envs = upsert(envs, e, false))" />
+      <EnvironmentFormModal v-model:open="formOpen" :environment="editing" @saved="saved" />
     </template>
   </UDashboardPanel>
 </template>

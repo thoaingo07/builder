@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NavAction from '@/components/NavAction.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '@/api/client'
 import type { BuildSummaryDto, DashboardDto, DeploymentDto } from '@/api/types'
@@ -77,7 +78,7 @@ onBeforeUnmount(() => offs.forEach(f => f()))
       <UDashboardNavbar title="Dashboard" icon="i-lucide-layout-dashboard">
         <template #right>
           <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" aria-label="Refresh" @click="load()" />
-          <UButton icon="i-lucide-play" label="Run a runner" to="/pipelines" />
+          <NavAction icon="i-lucide-play" label="Run a runner" to="/pipelines" />
         </template>
       </UDashboardNavbar>
     </template>

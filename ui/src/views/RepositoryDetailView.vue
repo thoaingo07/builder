@@ -7,6 +7,8 @@ import { shortSha } from '@/lib/format'
 import { useOrgStore } from '@/stores/org'
 import { useNotify } from '@/composables/useNotify'
 import WebhooksCard from '@/components/repositories/WebhooksCard.vue'
+import DataList from '@/components/DataList.vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 
 const props = defineProps<{ id: string }>()
 const org = useOrgStore()
@@ -32,7 +34,10 @@ const allMappableSelected = computed(() => {
   return list.length > 0 && list.every(f => picks[f.path]?.selected)
 })
 
-const columns: TableColumn<RunnerFileDto>[] = [
+const mobile = useIsMobile()
+type FileRow = RunnerFileDto & { id: string }
+const rows = computed<FileRow[]>(() => (files.value?.files ?? []).map(f => ({ ...f, id: f.path })))
+const columns: TableColumn<FileRow>[] = [
   { id: 'select', header: '' },
   { accessorKey: 'path', header: 'Runner file' },
   { id: 'name', header: 'Runner name' },
@@ -115,7 +120,7 @@ onMounted(async () => {
         </template>
         <template #right>
           <UButton
-            v-if="org.isAdmin && files?.files.length" icon="i-lucide-link-2" :label="`Map selected${selectedCount ? ` (${selectedCount})` : ''}`"
+            v-if="org.isAdmin && files?.files.length" icon="i-lucide-link-2" :label="mobile ? (selectedCount ? `Map ${selectedCount}` : 'Map') : `Map selected${selectedCount ? ` (${selectedCount})` : ''}`"
             :disabled="!selectedCount" :loading="mapping" @click="mapSelected"
           />
         </template>
@@ -123,9 +128,9 @@ onMounted(async () => {
       <UDashboardToolbar v-if="repo">
         <template #left>
           <USelectMenu
-            v-if="branches.length" v-model="branch" :items="branches" icon="i-lucide-git-branch" size="sm" class="w-56"
+            v-if="branches.length" v-model="branch" :items="branches" icon="i-lucide-git-branch" size="sm" class="w-40 sm:w-56"
           />
-          <UInput v-else v-model.lazy="branch" icon="i-lucide-git-branch" size="sm" class="w-56" @keydown.enter="loadFiles" />
+          <UInput v-else v-model.lazy="branch" icon="i-lucide-git-branch" size="sm" class="w-40 sm:w-56" @keydown.enter="loadFiles" />
           <UButton icon="i-lucide-refresh-cw" size="sm" color="neutral" variant="ghost" aria-label="Reload runner files" :loading="loadingFiles" @click="loadFiles" />
           <span v-if="files" class="font-mono text-xs text-muted">{{ shortSha(files.commit) }}</span>
         </template>
@@ -170,7 +175,32 @@ tasks:
               <span class="text-xs text-muted">.builder/runners/ · run from the repository root</span>
             </div>
           </template>
-          <UTable :data="files.files" :columns="columns" :loading="loadingFiles">
+          <DataList :data="rows" :columns="columns" :loading="loadingFiles">
+            <template #card="{ item: f }">
+              <div class="flex items-start gap-2">
+                <div class="pt-0.5">
+                  <UTooltip v-if="f.error" :text="f.error"><UCheckbox :model-value="false" disabled aria-label="Cannot be mapped" /></UTooltip>
+                  <UCheckbox v-else-if="org.isAdmin && !f.mappedRunnerId" v-model="picks[f.path].selected" :aria-label="`Select ${f.path}`" />
+                  <UIcon v-else-if="f.mappedRunnerId" name="i-lucide-check" class="text-success" />
+                </div>
+                <div class="min-w-0 flex-1 space-y-1.5">
+                  <div class="font-mono text-sm break-all">{{ f.path }}</div>
+                  <div v-if="f.error" class="text-xs break-words text-error">{{ f.error }}</div>
+                  <UButton
+                    v-if="f.mappedRunnerId" :to="`/pipelines/${f.mappedRunnerId}/editor`" size="xs" color="primary" variant="soft"
+                    icon="i-lucide-workflow" :label="`mapped as ${f.mappedRunnerName}`"
+                  />
+                  <div v-else-if="org.isAdmin && !f.error" class="grid grid-cols-2 gap-2">
+                    <UFormField label="Runner name" size="xs"><UInput v-model="picks[f.path].name" size="sm" class="w-full" /></UFormField>
+                    <UFormField label="Entry task" size="xs"><UInput v-model="picks[f.path].entryTask" size="sm" class="w-full font-mono" :placeholder="f.entryTask ?? 'default'" /></UFormField>
+                  </div>
+                  <div v-if="f.tasks.length" class="flex flex-wrap gap-1">
+                    <UBadge v-for="t in f.tasks.slice(0, 8)" :key="t" :label="t" size="sm" color="neutral" variant="soft" class="font-mono" />
+                    <span v-if="f.tasks.length > 8" class="text-xs text-muted">+{{ f.tasks.length - 8 }}</span>
+                  </div>
+                </div>
+              </div>
+            </template>
             <template #select-header>
               <UCheckbox v-if="org.isAdmin" :model-value="allMappableSelected" aria-label="Select all" @update:model-value="v => toggleAll(v === true)" />
             </template>
@@ -215,7 +245,7 @@ tasks:
                 <span v-if="row.original.tasks.length > 8" class="text-xs text-muted">+{{ row.original.tasks.length - 8 }}</span>
               </div>
             </template>
-          </UTable>
+          </DataList>
         </UCard>
         <p v-if="files?.files.length && !org.isAdmin" class="text-xs text-muted">Only admins can map runner files to runners.</p>
 

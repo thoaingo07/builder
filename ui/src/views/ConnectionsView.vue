@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NavAction from '@/components/NavAction.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import type { FormError, TableColumn } from '@nuxt/ui'
 import { api } from '@/api/client'
@@ -7,12 +8,15 @@ import { upsert } from '@/lib/collections'
 import { useOrgStore } from '@/stores/org'
 import { useNotify } from '@/composables/useNotify'
 import { useConfirm } from '@/composables/useConfirm'
+import { useHighlight } from '@/composables/useHighlight'
+import DataList from '@/components/DataList.vue'
 
 const org = useOrgStore()
 const notify = useNotify()
 const toast = useToast()
 const confirm = useConfirm()
 const connections = ref<ConnectionDto[]>([])
+const hl = useHighlight()
 const loading = ref(true)
 const formOpen = ref(false)
 const editing = ref<ConnectionDto | null>(null)
@@ -25,7 +29,7 @@ const s = reactive({
 
 const ARM_URL = 'https://management.azure.com'
 const typeItems = [
-  { label: 'Azure DevOps', value: 'AzureDevOps', icon: 'i-simple-icons-azuredevops' },
+  { label: 'Azure DevOps', value: 'AzureDevOps', icon: 'i-lucide-cloud-cog' },
   { label: 'Git (GitHub, GitLab, any HTTPS remote)', value: 'Git', icon: 'i-lucide-git-fork' },
   { label: 'Azure (container registries)', value: 'Azure', icon: 'i-lucide-cloud' },
 ]
@@ -41,7 +45,7 @@ const isSp = computed(() => isArm.value || (isAzure.value && s.authKind === 'Ser
 const hasStoredSecret = computed(() => !!editing.value?.hasToken && editing.value.authKind === (isSp.value ? 'ServicePrincipal' : 'Pat'))
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const typeLabel = (t: ConnectionType) => (t === 'AzureDevOps' ? 'Azure DevOps' : t === 'Azure' ? 'Azure' : 'Git')
-const typeIcon = (t: ConnectionType) => (t === 'AzureDevOps' ? 'i-simple-icons-azuredevops' : t === 'Azure' ? 'i-lucide-cloud' : 'i-lucide-git-fork')
+const typeIcon = (t: ConnectionType) => (t === 'AzureDevOps' ? 'i-lucide-cloud-cog' : t === 'Azure' ? 'i-lucide-cloud' : 'i-lucide-git-fork')
 
 const columns: TableColumn<ConnectionDto>[] = [
   { accessorKey: 'name', header: 'Name' },
@@ -97,6 +101,7 @@ async function submit() {
   try {
     const saved = editing.value ? await api.connections.update(editing.value.id, input) : await api.connections.create(input)
     connections.value = upsert(connections.value, saved, false)
+    void hl.flash(saved.id)
     notify.success(editing.value ? 'Connection updated' : 'Connection created', editing.value ? undefined : 'Use “Test” to check the credentials.')
     formOpen.value = false
   } catch (e) { notify.error(e, 'Could not save connection') } finally { saving.value = false }
@@ -130,19 +135,41 @@ onMounted(load)
     <template #header>
       <UDashboardNavbar title="Connections" icon="i-lucide-plug">
         <template #right>
-          <UButton v-if="org.isAdmin" icon="i-lucide-plus" label="New connection" @click="openForm(null)" />
+          <NavAction v-if="org.isAdmin" icon="i-lucide-plus" label="New connection" @click="openForm(null)" />
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
       <UEmpty
-        v-if="!loading && !connections.length" icon="i-simple-icons-azuredevops" title="No connections yet"
+        v-if="!loading && !connections.length" icon="i-lucide-cloud-cog" title="No connections yet"
         description="Connect an Azure DevOps organization with a personal access token, then add its repositories."
         :actions="org.isAdmin ? [{ label: 'New connection', icon: 'i-lucide-plus', onClick: () => openForm(null) }] : []"
       />
       <UCard v-else :ui="{ body: 'p-0 sm:p-0' }">
-        <UTable :data="connections" :columns="columns" :loading="loading" :ui="{ tr: org.isAdmin ? 'cursor-pointer' : '' }" @select="(_e, row) => openForm(row.original)">
+        <DataList :data="connections" :columns="columns" :loading="loading" :highlight-id="hl.id.value" :clickable="org.isAdmin" @select="openForm">
+          <template #card="{ item: c }">
+            <div class="flex items-start gap-2">
+              <div class="min-w-0 flex-1 space-y-1">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="font-medium text-highlighted">{{ c.name }}</span>
+                  <UBadge :label="typeLabel(c.type)" color="neutral" variant="subtle" size="sm" :icon="typeIcon(c.type)" />
+                  <UBadge v-if="c.authKind === 'ServicePrincipal'" label="Service principal" icon="i-lucide-shield-check" color="primary" variant="subtle" size="sm" />
+                  <UBadge v-else-if="c.hasToken" label="PAT" icon="i-lucide-key-round" color="neutral" variant="subtle" size="sm" />
+                </div>
+                <div class="truncate font-mono text-xs text-muted" :title="c.url">{{ c.type === 'Azure' ? (c.clientId ?? 'Azure Resource Manager') : c.url }}</div>
+              </div>
+              <div class="flex shrink-0 items-center gap-1" @click.stop>
+                <UButton icon="i-lucide-plug-zap" label="Test" size="xs" color="neutral" variant="outline" :loading="testing === c.id" @click="test(c)" />
+                <UDropdownMenu
+                  v-if="org.isAdmin" :content="{ align: 'end' }"
+                  :items="[[{ label: 'Edit', icon: 'i-lucide-pencil', onSelect: () => openForm(c) }], [{ label: 'Delete', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => remove(c) }]]"
+                >
+                  <UButton icon="i-lucide-ellipsis-vertical" size="xs" color="neutral" variant="ghost" aria-label="More actions" />
+                </UDropdownMenu>
+              </div>
+            </div>
+          </template>
           <template #name-cell="{ row }"><span class="font-medium text-highlighted">{{ row.original.name }}</span></template>
           <template #type-cell="{ row }">
             <UBadge :label="typeLabel(row.original.type)" color="neutral" variant="subtle" size="sm" :icon="typeIcon(row.original.type)" />
@@ -167,7 +194,7 @@ onMounted(load)
               <UButton v-if="org.isAdmin" icon="i-lucide-trash-2" size="xs" color="error" variant="ghost" aria-label="Delete" @click="remove(row.original)" />
             </div>
           </template>
-        </UTable>
+        </DataList>
       </UCard>
 
       <UModal v-model:open="formOpen" :title="editing ? `Edit ${editing.name}` : 'New connection'" :ui="{ content: 'sm:max-w-xl' }">

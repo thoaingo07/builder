@@ -11,6 +11,8 @@ import { useLiveStore } from '@/stores/live'
 import { useNotify } from '@/composables/useNotify'
 import { useConfirm } from '@/composables/useConfirm'
 import AgentTokenModal from '@/components/org/AgentTokenModal.vue'
+import DataList from '@/components/DataList.vue'
+import { useHighlight } from '@/composables/useHighlight'
 
 const auth = useAuthStore()
 const org = useOrgStore()
@@ -62,7 +64,10 @@ const isSelf = (m: MemberDto) => m.userName.toLowerCase() === auth.user?.userNam
 /** Admins manage members and admins; only owners touch owners. */
 const canManage = (m: MemberDto) => !isSelf(m) && org.isAdmin && (m.role !== 'Owner' || org.isOwner)
 
-const columns: TableColumn<MemberDto>[] = [
+type MemberRow = MemberDto & { id: string }
+const rows = computed<MemberRow[]>(() => members.value.map(m => ({ ...m, id: m.userId })))
+const hl = useHighlight()
+const columns: TableColumn<MemberRow>[] = [
   { accessorKey: 'displayName', header: 'Member' },
   { accessorKey: 'role', header: 'Role' },
   { id: 'joined', header: 'Joined' },
@@ -79,6 +84,7 @@ async function changeRole(m: MemberDto, role: OrgRole) {
   try {
     const updated = await api.org.setRole(m.userId, role)
     members.value = members.value.map(x => (x.userId === m.userId ? updated : x))
+    void hl.flash(updated.userId)
     notify.success(`${m.displayName} is now ${role}`)
   } catch (e) { notify.error(e, 'Role change failed'); members.value = [...members.value] } finally { busyId.value = null }
 }
@@ -121,6 +127,7 @@ async function addMember() {
   try {
     const m = await api.org.addMember(add.email.trim(), add.role)
     members.value = [...members.value.filter(x => x.userId !== m.userId), m]
+    void hl.flash(m.userId)
     notify.success(`Added ${m.email ?? m.userName}`, m.canSignInWithGoogle ? 'They can sign in with Google using that address.' : undefined)
     addOpen.value = false
     add.email = ''
@@ -177,7 +184,27 @@ onMounted(loadMembers)
             <UButton v-if="org.isAdmin" icon="i-lucide-user-plus" label="Add member" size="sm" @click="addOpen = true" />
           </div>
         </template>
-        <UTable :data="members" :columns="columns" :loading="loading">
+        <DataList :data="rows" :columns="columns" :loading="loading" :highlight-id="hl.id.value">
+          <template #card="{ item: m }">
+            <div class="flex items-center gap-2">
+              <UAvatar :alt="m.displayName" size="sm" />
+              <div class="min-w-0 flex-1">
+                <div class="truncate font-medium text-highlighted">
+                  {{ m.displayName }} <UBadge v-if="isSelf(m)" label="You" size="sm" color="primary" variant="subtle" />
+                </div>
+                <div class="truncate text-xs text-muted" :title="m.email ?? m.userName">{{ m.email ?? m.userName }}</div>
+              </div>
+              <USelect
+                v-if="canManage(m)" :model-value="m.role" :items="roleItems" size="xs" class="w-28 shrink-0"
+                :loading="busyId === m.userId" @update:model-value="(r: OrgRole) => changeRole(m, r)"
+              />
+              <UBadge v-else :label="m.role" :color="m.role === 'Owner' ? 'primary' : m.role === 'Admin' ? 'info' : 'neutral'" variant="subtle" class="shrink-0" />
+              <UButton
+                v-if="canManage(m)" icon="i-lucide-user-minus" size="xs" color="error" variant="ghost" class="shrink-0"
+                aria-label="Remove member" :loading="busyId === m.userId" @click="remove(m)"
+              />
+            </div>
+          </template>
           <template #displayName-cell="{ row }">
             <div class="flex items-center gap-2">
               <UAvatar :alt="row.original.displayName" size="sm" />
@@ -209,7 +236,7 @@ onMounted(loadMembers)
               />
             </div>
           </template>
-        </UTable>
+        </DataList>
       </UCard>
 
       <UModal v-model:open="addOpen" title="Add member" description="Existing users are added immediately. An unknown e-mail becomes an invitation: that address can then sign in with Google.">

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NavAction from '@/components/NavAction.vue'
 import { computed, onMounted, ref } from 'vue'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { api } from '@/api/client'
@@ -94,8 +95,8 @@ onMounted(load)
         </template>
         <template #right>
           <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" aria-label="Refresh" @click="load" />
-          <UButton v-if="org.isAdmin" icon="i-lucide-key-round" label="New token" color="neutral" variant="outline" :loading="regenerating" @click="regenerate" />
-          <UButton icon="i-lucide-plus" label="Add agent" @click="addAgent" />
+          <NavAction v-if="org.isAdmin" icon="i-lucide-key-round" label="New token" color="neutral" variant="outline" :loading="regenerating" @click="regenerate" />
+          <NavAction icon="i-lucide-plus" label="Add agent" @click="addAgent" />
         </template>
       </UDashboardNavbar>
     </template>
